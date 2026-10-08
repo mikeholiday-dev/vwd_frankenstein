@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from channels import web
 from channels.credentials import CredentialStore
-from harness import fakes
+from harness import config, fakes
 from harness.contracts import EventType, Manifest
 from harness.kernel.limits import LIMITS
 from harness.ops.events import EventLog
@@ -232,3 +232,50 @@ def test_summary_mixes_runs_from_every_channel(dashboard, events):
     s = w.summary()
     assert s["total_runs"] == 2
     assert s["by_status"] == {"ok": 1, "failed": 1}
+
+
+# ---- start from scratch (dev only): scripts/fresh_start.py behind a button --------------------
+
+
+@pytest.fixture
+def scratch(tmp_path, monkeypatch):
+    for name, value in (("LOG_PATH", tmp_path / "logs" / "events.jsonl"), ("REGISTRY_DIR", tmp_path / "registry"), ("WORK_DIR", tmp_path / "work")):
+        monkeypatch.setattr(config, name, value)
+    monkeypatch.setattr(config, "MODE", "dev")
+    monkeypatch.setattr(web, "ARCHIVE", tmp_path / "rehearsals")
+    log = EventLog(config.LOG_PATH, session="web")
+    monkeypatch.setattr(web, "events", log)
+    fakes.DirRegistry(config.REGISTRY_DIR).install(BUNDLE, Manifest.load(BUNDLE))
+    (config.WORK_DIR / "run-1").mkdir(parents=True)
+    return log
+
+
+def test_reset_archives_registry_log_and_work(scratch, tmp_path):
+    scratch.emit(EventType.RUN_STARTED, task="t")
+    scratch.emit(EventType.RUN_FINISHED, status="ok")
+    dest = Path(web.reset(web.Reset())["archived_to"])
+
+    assert dest.parent == tmp_path / "rehearsals" and dest.name.endswith("-dashboard")
+    assert (dest / "registry" / "echo").is_dir() and (dest / "work" / "run-1").is_dir()
+    assert (dest / "events.jsonl").read_text().count("\n") == 2
+    assert not config.REGISTRY_DIR.exists() and not config.WORK_DIR.exists()
+    assert config.LOG_PATH.read_text() == ""
+
+
+def test_reset_is_refused_in_demo_mode(scratch, monkeypatch):
+    monkeypatch.setattr(config, "MODE", "demo")
+    with pytest.raises(HTTPException) as err:
+        web.reset(web.Reset(force=True))
+    assert err.value.status_code == 403
+    assert config.REGISTRY_DIR.exists()
+
+
+def test_reset_waits_for_unfinished_runs_unless_forced(scratch):
+    scratch.emit(EventType.RUN_STARTED, task="still going, or died")
+    with pytest.raises(HTTPException) as err:
+        web.reset(web.Reset())
+    assert err.value.status_code == 409 and "unfinished" in err.value.detail
+    assert config.REGISTRY_DIR.exists()
+
+    assert web.reset(web.Reset(force=True))["archived_to"]
+    assert not config.REGISTRY_DIR.exists()

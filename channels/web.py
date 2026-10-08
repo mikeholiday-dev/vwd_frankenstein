@@ -32,6 +32,7 @@ from harness.ops.approvals import decide
 from harness.ops.events import EventLog
 from harness.wiring import make_registry
 from scripts.evidence import summarize
+from scripts.fresh_start import ARCHIVE, fresh_start
 
 app = FastAPI(title="Frankenstein dashboard")
 store = CredentialStore()
@@ -57,6 +58,10 @@ class Decision(BaseModel):
 
 class Version(BaseModel):
     version: int
+
+
+class Reset(BaseModel):
+    force: bool = False  # archive even with unfinished runs in the log (a run whose process died never finishes)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -195,6 +200,23 @@ def quarantine(name: str):
         raise HTTPException(404, f"{name} is not installed") from None
     events.emit(EventType.QUARANTINE, name=name, by="operator")
     return {"ok": True}
+
+
+@app.post("/api/reset")
+def reset(body: Reset):
+    """Dev only: start from scratch. Moves the registry, the event log and the build workspaces
+    into rehearsals/<timestamp>-dashboard/ through scripts/fresh_start.py; never deletes anything.
+    The next make_registry() creates an empty registry, and every open page reloads on the SSE reset."""
+    if config.MODE != "dev":
+        raise HTTPException(403, "start from scratch is dev mode only")
+    unfinished = [r.run_id for r in summarize(events.read_from(0)[0]) if r.status == "unfinished"]
+    if unfinished and not body.force:
+        raise HTTPException(409, f"{len(unfinished)} run(s) unfinished: {', '.join(unfinished)}. Kill them first, or force if they died")
+    try:
+        dest = fresh_start(label="dashboard", archive=ARCHIVE)
+    except SystemExit as e:  # fresh_start refuses to overwrite an archive; don't let that take the server down
+        raise HTTPException(409, str(e)) from None
+    return {"archived_to": str(dest) if dest else None}
 
 
 # ---- credentials ------------------------------------------------------------------------------
