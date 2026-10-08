@@ -5,6 +5,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Personal Claude Code notes (e.g. which stream you're on)
+CLAUDE.local.md
+
 # Runtime state written by the harness and the agent
 work/
 # registry/ is its own git repo created by the harness; decide at the freeze how to ship it
