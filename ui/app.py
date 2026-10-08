@@ -56,6 +56,9 @@ async def stream(request: Request, offset: int = 0):
     async def gen():
         pos = offset
         while not await request.is_disconnected():
+            if (events.path.stat().st_size if events.path.exists() else 0) < pos:  # moved aside by scripts/fresh_start.py
+                yield "event: reset\ndata: {}\n\n"
+                return
             new, pos = events.read_from(pos)
             for e in new:
                 yield f"id: {e.id}\nevent: {e.type}\ndata: {json.dumps(to_jsonable(e), ensure_ascii=False)}\n\n"

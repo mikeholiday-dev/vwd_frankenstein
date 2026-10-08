@@ -543,6 +543,7 @@ for (const t of TYPES) es.addEventListener(t, (msg) => {
   if (msg instanceof MessageEvent) { apply(JSON.parse(msg.data)); schedule(); }
   else { $("conn").className = "chip bad"; $("conn").textContent = "disconnected"; }
 });
+es.addEventListener("reset", () => { es.close(); location.reload(); });  // the log was moved aside: replay the new one
 es.onopen = () => { $("conn").className = "chip ok"; $("conn").textContent = "live"; };
 
 fetch("/api/config").then((r) => r.json()).then((c) => { S.config = c; S.dirty.add("header"); schedule(); }).catch(() => {});

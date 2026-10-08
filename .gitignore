@@ -12,6 +12,8 @@ CLAUDE.local.md
 work/
 # registry/ is its own git repo created by the harness; decide at the freeze how to ship it
 registry/
+# earlier rehearsals, moved aside by scripts/fresh_start.py
+rehearsals/
 
 # Dependencies
 node_modules/
