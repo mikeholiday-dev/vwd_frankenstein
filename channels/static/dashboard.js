@@ -1,19 +1,59 @@
 // Owner: D. Same event log as the console (ui/static/index.html): approvals, kill and the
 // budget meter are driven live off the SSE stream; runs/outputs come from /api/summary
 // (scripts.evidence.summarize under the hood), refetched on the events that change it rather
-// than reconstructed event-by-event in here — a deliberately simpler state model than the
-// console's, since this surface's job is "configure it, see the outputs", not a build-by-build
-// lab view.
+// than reconstructed event-by-event in here — a deliberately lighter state model than the
+// console's own build-by-build lab view. The one exception: every event is also kept per
+// run_id (S.eventsByRun), so clicking an output can expand its full log without a server
+// round trip — using the same per-event wording the console's own timeline uses.
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const chip = (text, cls = "") => `<span class="chip ${cls}">${esc(text)}</span>`;
+const tags = (xs, cls = "") => (xs || []).map((x) => `<span class="tag ${cls}">${esc(x)}</span>`).join("");
+const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour12: false });
+const refused = (reason) => String(reason || "").startsWith("refused:");
+const denied = (xs) => (xs?.length ? ` <span class="refused">egress refused:</span> ${tags(xs, "deny")}` : "");
+const suite = (x) => (!x || x === "own" ? "" : x === "retest" ? chip("retest", "info") : chip(x.replace(/ tests$/, ""), "info"));
 
 const STATUS_TONE = { ok: "ok", failed: "bad", killed: "bad", capped: "warn", unfinished: "info", running: "info" };
 const STATUS_LABEL = { ok: "ok", failed: "failed", killed: "killed", capped: "capped", unfinished: "running" };
 const CRED_LABELS = { telegram: "Telegram bot token", discord: "Discord bot token", elevenlabs: "ElevenLabs API key", apify: "Apify API token" };
 
-const S = { config: null, summary: null, registry: [], versions: new Map(), creds: {}, pending: new Map(), budget: null, caps: [], lastId: -1 };
+const S = {
+  config: null, summary: null, registry: [], versions: new Map(), creds: {}, pending: new Map(), budget: null, caps: [], lastId: -1,
+  eventsByRun: new Map(), openRuns: new Set(), approvalRun: new Map(),
+};
+
+// ---- per-run full log: every event carrying a run_id, in the same wording the console uses ----
+
+function logLine(e) {
+  const d = e.data;
+  switch (e.type) {
+    case "run_started": return `<b>${esc(d.task)}</b>`;
+    case "plan": return esc(d.text);
+    case "gap": return `${esc(d.gap)} <span class="muted">${esc(d.why)}</span>`;
+    case "study": return esc(d.query);
+    case "build": return `${esc(d.ref)} · ${esc(d.role)} attempt ${esc(d.attempt)}`;
+    case "test_run": return `${chip(d.passed ? "pass" : "fail", d.passed ? "ok" : "bad")} ${esc(d.ref)} ${suite(d.suite)}${denied(d.egress_denied)}`;
+    case "approval_requested": return `${esc(d.ref)} waits for the operator`;
+    case "approval_decided": return `${chip(d.approved ? "approved" : "rejected", d.approved ? "ok" : "bad")} by ${esc(d.by)}${d.reason ? ` · “${esc(d.reason)}”` : ""}`;
+    case "install": return `${esc(d.ref)} ${d.installed ? "installed" : "not installed"} <span class="${refused(d.reason) ? "refused" : "muted"}">${esc(d.reason)}</span>`;
+    case "call": return `${esc(d.ref)} ${chip(d.ok ? "ok" : "error", d.ok ? "ok" : "bad")} <span class="tag">${esc(d.call_id)}</span>${denied(d.egress_denied)}`;
+    case "answer": return esc(d.text);
+    case "cap_hit": return `${chip("cap hit", "bad")} ${esc(d.limit)} = ${esc(d.value)} (max ${esc(d.max)})`;
+    case "kill": return `${chip("kill", "bad")} by ${esc(d.by)}`;
+    case "error": return `<span style="color:var(--bad)">${esc(d.message)}</span>`;
+    case "run_finished": return chip(d.status, STATUS_TONE[d.status] || "");
+    default: return null; // budget: shown live by the meters, not worth a line per turn
+  }
+}
+
+function renderRunLog(runId) {
+  const events = S.eventsByRun.get(runId) || [];
+  const lines = events.map((e) => [e, logLine(e)]).filter(([, text]) => text != null);
+  if (!lines.length) return `<div class="run-log"><div class="empty">No detail recorded for this run yet.</div></div>`;
+  return `<div class="run-log">${lines.map(([e, text]) => `<div class="ev"><time>${clock(e.ts)}</time><div><span class="kind">${esc(e.type)}</span>${text}</div></div>`).join("")}</div>`;
+}
 
 async function j(url, opts) {
   const r = await fetch(url, opts);
@@ -118,12 +158,21 @@ function renderRuns() {
   $("runs").className = "";
   $("runs").innerHTML = runs.slice(0, 15).map((r) => {
     const tone = STATUS_TONE[r.status] || "";
-    return `<div class="run-item">
-      <div class="head">${chip(STATUS_LABEL[r.status] || r.status, tone)}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span></div>
-      <div class="muted small">session ${esc(r.session)} · $${Number(r.usd || 0).toFixed(3)}${r.built.length ? ` · built ${r.built.map(esc).join(", ")}` : ""}${r.reused.length ? ` · reused ${r.reused.map(esc).join(", ")}` : ""}</div>
-      ${r.answer ? `<div class="answer">${esc(r.answer)}</div>` : ""}
-    </div>`;
+    const open = S.openRuns.has(r.run_id);
+    return `<details class="run-item" data-run="${esc(r.run_id)}"${open ? " open" : ""}>
+      <summary>
+        <div class="head">${chip(STATUS_LABEL[r.status] || r.status, tone)}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span></div>
+        <div class="muted small">session ${esc(r.session)} · $${Number(r.usd || 0).toFixed(3)}${r.built.length ? ` · built ${r.built.map(esc).join(", ")}` : ""}${r.reused.length ? ` · reused ${r.reused.map(esc).join(", ")}` : ""}</div>
+        ${r.answer ? `<div class="answer">${esc(r.answer)}</div>` : ""}
+      </summary>
+      ${open ? renderRunLog(r.run_id) : ""}
+    </details>`;
   }).join("");
+  $("runs").querySelectorAll("details.run-item").forEach((el) => el.addEventListener("toggle", () => {
+    if (el.open) S.openRuns.add(el.dataset.run);
+    else S.openRuns.delete(el.dataset.run);
+    if (el.open && !el.querySelector(".run-log")) el.insertAdjacentHTML("beforeend", renderRunLog(el.dataset.run));
+  }));
 }
 
 // ---- registry -------------------------------------------------------------------------------
@@ -276,9 +325,24 @@ function onEvent(type, e) {
   if (e.id <= S.lastId) return;
   S.lastId = e.id;
   const d = e.data;
+
+  // approval_decided is written by whichever approver (console or dashboard) under its own
+  // session, not the run's — re-attribute it to the run that asked, the same way
+  // scripts.evidence.summarize does, via the request id approval_requested already recorded.
+  const runId = type === "approval_decided" ? S.approvalRun.get(d.request_id) || e.run_id : e.run_id;
+  if (runId) {
+    if (!S.eventsByRun.has(runId)) S.eventsByRun.set(runId, []);
+    S.eventsByRun.get(runId).push(e);
+    if (S.openRuns.has(runId)) {
+      const el = document.querySelector(`details.run-item[data-run="${CSS.escape(runId)}"] .run-log`);
+      if (el) el.outerHTML = renderRunLog(runId);
+    }
+  }
+
   switch (type) {
     case "approval_requested":
       S.pending.set(d.id, d);
+      S.approvalRun.set(d.id, e.run_id);
       renderApprovals();
       break;
     case "approval_decided":
