@@ -55,6 +55,7 @@ function renderHeader() {
   $("chips").innerHTML = (c.mode === "demo" ? chip("demo mode", "ok") : chip("dev mode"))
     + (c.fakes.length ? " " + chip("fake " + c.fakes.join(" + "), "warn") : "") + " " + chip("auth: " + c.auth)
     + (c.models === "cheap" ? " " + chip("models: cheap", "warn") : "");
+  $("reset").hidden = c.mode !== "dev";
 }
 
 // ---- stat tiles: a hero number for a job that's just "one number" ----------------------------
@@ -330,6 +331,23 @@ $("kill").addEventListener("click", async () => {
   delete $("kill").dataset.armed;
   $("kill").textContent = "Kill switch";
   await j("/api/kill", { method: "POST" });
+});
+
+// Start from scratch (dev only): archives everything to rehearsals/, the SSE "reset" event then reloads the page.
+async function postReset(force) {
+  const r = await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force }) });
+  return { status: r.status, body: await r.json().catch(() => ({})) };
+}
+
+$("reset").addEventListener("click", async () => {
+  if (!confirm("Start from scratch? Every installed tool, the event log and the build workspaces move to rehearsals/ (nothing is deleted).")) return;
+  let res = await postReset(false);
+  if (res.status === 409 && String(res.body.detail).includes("unfinished")) {
+    if (!confirm(`${res.body.detail}\n\nArchive anyway?`)) return;
+    res = await postReset(true);
+  }
+  if (res.status !== 200) { banner("bad", `Start from scratch failed: ${res.body.detail || res.status}`); return; }
+  location.reload();
 });
 
 loadConfig();
