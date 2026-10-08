@@ -4,6 +4,8 @@ FRANK_MODE      dev (default) | demo. Demo refuses every fake and the auto appro
 FRANK_FAKE      comma list of components to replace with fakes: sandbox,registry or "all" / "none".
                 Default: none (Docker sandbox + git registry). Dev without Docker: FRANK_FAKE=sandbox.
 FRANK_APPROVER  cli (default) | ui | auto
+FRANK_MODELS    full (default) | cheap. Cheap runs the planner and tester on Haiku and every build on Sonnet,
+                for rehearsing the plumbing. Demo refuses it.
 """
 
 from __future__ import annotations
@@ -23,6 +25,9 @@ MODE = os.environ.get("FRANK_MODE", "dev")
 # anything deployed must use an API key. Recorded in every run_started event.
 AUTH = "api_key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription"
 APPROVER = os.environ.get("FRANK_APPROVER", "cli")
+MODELS = os.environ.get("FRANK_MODELS", "full")
+if MODELS not in ("full", "cheap"):
+    raise SystemExit(f"FRANK_MODELS must be full or cheap, not {MODELS!r}")
 
 _FAKEABLE = {"sandbox", "registry"}
 _fake_env = os.environ.get("FRANK_FAKE", "none")
@@ -30,5 +35,5 @@ FAKES: set[str] = (
     _FAKEABLE if _fake_env == "all" else set() if _fake_env in ("", "none") else set(_fake_env.split(","))
 )
 
-if MODE == "demo" and (FAKES or APPROVER == "auto"):
-    raise SystemExit(f"FRANK_MODE=demo forbids fakes ({sorted(FAKES)}) and the auto approver")
+if MODE == "demo" and (FAKES or APPROVER == "auto" or MODELS != "full"):
+    raise SystemExit(f"FRANK_MODE=demo forbids fakes ({sorted(FAKES)}), the auto approver and FRANK_MODELS={MODELS}")

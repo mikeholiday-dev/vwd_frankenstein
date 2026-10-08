@@ -30,7 +30,7 @@ No API key from the organisers, so local dev and the demo run on our own subscri
 - Keep `ANTHROPIC_API_KEY` **unset**. If it's set, the Agent SDK uses it and bills it. `config.AUTH` says which one is active, and every `run_started` event records it.
 - Every model call goes through `claude-agent-sdk`. The plain `anthropic` client needs an API key.
 - The `$` in `limits.py` and the UI meter is an **API-equivalent estimate**. It's still capped in code, which is what the brief asks for.
-- Subscription usage limits are the real constraint. Builder runs on Opus burn through them fastest, so spread rehearsals across people and don't leave the agent looping.
+- Subscription usage limits are the real constraint. Builds burn through them fastest (repairs run on Opus), so spread rehearsals across people, don't leave the agent looping, and use `FRANK_MODELS=cheap` when you're only testing the plumbing.
 - Anything we deploy later switches to an API key. No code change is needed, only the env var.
 
 ## Switches
@@ -39,7 +39,8 @@ No API key from the organisers, so local dev and the demo run on our own subscri
 |---|---|---|
 | `FRANK_FAKE` | `none` (default), `sandbox`, `registry`, `sandbox,registry` | which components are fakes. Without Docker use `sandbox` (dev only: it runs code on your machine) |
 | `FRANK_APPROVER` | `cli` (default), `ui`, `auto` | `ui` = block on the console's approval card |
-| `FRANK_MODE` | `dev` (default), `demo` | `demo` refuses every fake and the auto approver |
+| `FRANK_MODELS` | `full` (default), `cheap` | `cheap` = planner and tester on Haiku, every build on Sonnet. For rehearsing the plumbing |
+| `FRANK_MODE` | `dev` (default), `demo` | `demo` refuses every fake, the auto approver and `FRANK_MODELS=cheap` |
 | `FRANK_LOG`, `FRANK_REGISTRY_DIR`, `FRANK_WORK_DIR` | paths | point at a scratch dir so you can wipe freely without touching the others |
 
 ## Stream A: kernel (sandbox, proxy, registry, gate, limits)

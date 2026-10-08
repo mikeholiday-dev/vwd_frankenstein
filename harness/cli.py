@@ -50,12 +50,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(to_jsonable(ctx.host.call(a.name, json.loads(a.args))), indent=2, ensure_ascii=False))
         return 0
 
-    from harness.agent.loop import run_session
+    from harness.agent.loop import MODELS, run_session
 
     if missing := [str(f) for f in a.attach if not f.is_file()]:
         p.error(f"--attach: not a file: {', '.join(missing)}")
     ctx.events.emit(
-        EventType.RUN_STARTED, task=a.task, pid=os.getpid(), auth=config.AUTH,
+        EventType.RUN_STARTED, task=a.task, pid=os.getpid(), auth=config.AUTH, models=MODELS,
         registry=[e.manifest.ref for e in ctx.registry.list()], attached=[f.name for f in a.attach],
     )  # fmt: skip
     status = "failed"

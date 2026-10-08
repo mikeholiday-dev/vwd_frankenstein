@@ -32,16 +32,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from harness import config
 from harness.agent import model, tools
 from harness.agent.model import Stop, ToolSpec, obj
 from harness.kernel import compose
 from harness.contracts import CODE_FILE, MANIFEST_FILE, TESTS_DIR, CallResult, EventType, Gap, InstallResult, Kind, Manifest
 from harness.wiring import Context
 
-PLANNER_MODEL = "claude-sonnet-5-5"
-BUILDER_MODEL = "claude-opus-5-5"
-TESTER_MODEL = "claude-sonnet-5-5"
-JUDGE_MODEL = "claude-haiku-5-5"
+OPUS, SONNET, HAIKU = "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"
+# Model per role, by FRANK_MODELS. A gap is built on Sonnet; only one that fails the install gate gets Opus for its repairs.
+TIERS = {
+    "full": {"planner": SONNET, "builder": SONNET, "tester": SONNET, "repair": OPUS},
+    "cheap": {"planner": HAIKU, "builder": SONNET, "tester": HAIKU, "repair": SONNET},  # rehearsals only: demo mode refuses it
+}
+MODELS = TIERS[config.MODELS]
+JUDGE_MODEL = HAIKU
 
 PROMPTS = Path(__file__).parent / "prompts"
 EVENT_FILE_CHARS = 20_000  # per file shown in the console's lab panel
@@ -84,7 +89,7 @@ class Session:
         installed = self.ctx.host.available()
         listing = "\n".join(f"- {e.manifest.ref}: {e.manifest.description} | input {json.dumps(e.manifest.interface.get('input', {}))}" for e in installed)
         text = model.run_role(
-            self.ctx, "planner", PLANNER_MODEL, prompt("planner"),
+            self.ctx, "planner", MODELS["planner"], prompt("planner"),
             f"Task:\n{task}\n\n{self._inputs_brief()}Installed capabilities:\n{listing or '(none)'}",
             self.planner_tools([e.manifest for e in installed]),
         )  # fmt: skip
@@ -188,8 +193,8 @@ class Session:
                 "bundle: tests need their own sample files."
             )
 
-        self._role("builder", BUILDER_MODEL, "builder", spec, bundle, attempt=1)
-        self._role("tester", TESTER_MODEL, "tester", spec + "\nThe builder's files are in the workspace. Read them, then write the tests.", bundle, attempt=1)
+        self._role("builder", "builder", spec, bundle, attempt=1)
+        self._role("tester", "tester", spec + "\nThe builder's files are in the workspace. Read them, then write the tests.", bundle, attempt=1)
 
         attempt = 1
         while True:
@@ -200,11 +205,11 @@ class Session:
             attempt += 1
             output = (result.test_report.output if result.test_report else "")[-FEEDBACK_CHARS:]
             feedback = f"{spec}\nThe install gate did not install the bundle.\nReason: {result.reason}\nTest output (the harness ran it):\n{output or '(no tests were run)'}"
-            note = self._role("repair", BUILDER_MODEL, "builder", feedback + "\nFix the bundle. You can't edit tests/: if a test itself is wrong, "
+            note = self._role("repair", "builder", feedback + "\nFix the bundle. You can't edit tests/: if a test itself is wrong, "
                               "end your reply with a line starting TESTS_WRONG: and say why.", bundle, attempt)  # fmt: skip
             if "TESTS_WRONG:" in note:
                 complaint = note.split("TESTS_WRONG:", 1)[1].strip()
-                self._role("tester", TESTER_MODEL, "tester", feedback + f"\nThe builder says a test is wrong: {complaint}\n"
+                self._role("tester", "tester", feedback + f"\nThe builder says a test is wrong: {complaint}\n"
                            "Check that against the gap and the docs. Fix the tests only if they are wrong.", bundle, attempt)  # fmt: skip
 
     def _upgrade_brief(self, upgrade: str | None) -> str:
@@ -238,7 +243,7 @@ class Session:
         finally:
             _unstage(root)
 
-    def _role(self, role: str, model_id: str, prompt_name: str, brief: str, bundle: str, attempt: int) -> str:
+    def _role(self, role: str, prompt_name: str, brief: str, bundle: str, attempt: int) -> str:
         """Run the builder, the tester or a repair in the bundle dir and log what it wrote."""
         ctx = self.ctx
         root = ctx.workdir / bundle
@@ -274,7 +279,7 @@ class Session:
             ToolSpec("registry_read", "Manifest, code and tests of one installed capability.",
                      obj({"name": "string"}, {"version": "integer"}), lambda a: tools.registry_read(ctx, a["name"], a.get("version"))),
         ]  # fmt: skip
-        note = model.run_role(ctx, role, model_id, prompt(prompt_name), brief, specs)
+        note = model.run_role(ctx, role, MODELS[role], prompt(prompt_name), brief, specs)
 
         after = {p: p.read_text(errors="replace") for p in _files(root)}
         changed = {str(p.relative_to(root)): text for p, text in after.items() if before.get(p) != text}

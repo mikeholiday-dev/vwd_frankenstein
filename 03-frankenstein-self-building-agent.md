@@ -1,6 +1,6 @@
 # 3. Frankenstein: Self-Building Agent
 
-**Shared defaults (see [README](README.md)):** Python, Claude Agent SDK, `claude-sonnet-5-5` for the main agent loop, `claude-opus-5-5` as the tool builder, and `claude-haiku-5-5` for cheap work (classification, LLM-judge scoring). Agent events are streamed over SSE so judges can watch the agent think. **Deviation:** the UI is a thin FastAPI + SSE + single HTML page instead of Next.js, because the night is short and the UI is not what gets judged.
+**Shared defaults (see [README](README.md)):** Python, Claude Agent SDK, `claude-sonnet-5-5` for the main agent loop, `claude-opus-5-5` as the tool builder, and `claude-haiku-5-5` for cheap work (classification, LLM-judge scoring). **Deviation:** the builder runs on Sonnet and only repairs run on Opus (see [Model per role](#model-per-role)). Agent events are streamed over SSE so judges can watch the agent think. **Deviation:** the UI is a thin FastAPI + SSE + single HTML page instead of Next.js, because the night is short and the UI is not what gets judged.
 
 **Pitch:** An agent that notices when it can't do something, writes the missing capability itself, tests it in a sandbox, asks the operator to approve it, installs it in a versioned registry, and in a *fresh session* combines it with other capabilities to solve a *different* task. It also builds the tools it uses to find and manage its own capabilities. **Its capabilities may grow; its authority may not.**
 
@@ -88,13 +88,36 @@ Fallback if an API is down during the demo: the scenario still runs on recorded 
 
 | Layer | Choice |
 |---|---|
-| Agent loop | Claude Agent SDK (Python). Planner/runtime `claude-sonnet-5-5`, builder `claude-opus-5-5`, tester `claude-sonnet-5-5` (a different role and prompt than the builder, so the builder doesn't grade itself), judge `claude-haiku-5-5` |
+| Agent loop | Claude Agent SDK (Python). Planner/runtime `claude-sonnet-5-5`, builder `claude-sonnet-5-5`, repair `claude-opus-5-5`, tester `claude-sonnet-5-5` (a different role and prompt than the builder, so the builder doesn't grade itself), judge `claude-haiku-5-5`. See [Model per role](#model-per-role) |
 | Sandbox | Docker, one container per build, test or call. `uv` for per-capability dependencies |
 | Egress | Small Python proxy: CONNECT allowlist per container token, plus gateway mode that injects keys for keyed APIs |
 | Registry | `registry/` git repo. Folder per capability, git tag per version (`ares_lookup@v2`). Diff, history and rollback come free |
 | Capability formats | **Code tool** (Python function), **prompt-skill** (`SKILL.md` + eval cases), optional **MCP server** export (stretch) |
 | Log | Append-only JSONL. Every event: plan, gap, study, build, test output, approval, install, call, cap hit |
 | UI | Chat + live "lab" (code, tests, status) + registry view + approval cards + budget meter |
+
+### Model per role
+
+| Role | `FRANK_MODELS=full` (default, demo) | `FRANK_MODELS=cheap` (rehearsals only) |
+|---|---|---|
+| Planner | `claude-sonnet-5-5` | `claude-haiku-5-5` |
+| Builder (first attempt) | `claude-sonnet-5-5` | `claude-sonnet-5-5` |
+| Repair (after the gate refuses a build) | `claude-opus-5-5` | `claude-sonnet-5-5` |
+| Tester | `claude-sonnet-5-5` | `claude-haiku-5-5` |
+
+The table lives in `harness/agent/loop.py` (`TIERS`). Every `run_started` event records the models the run used.
+
+The first plan put every build on Opus. We changed that after looking at where the tokens go:
+
+- **Builds cost the most.** Every tool call is a model turn, and every turn sends the whole session again. On task 2 the builder took ~20 turns, a repair ~10 and the tester ~13 (`limits.py`). Opus costs twice as much per token as Sonnet (`PRICES_PER_MTOK`), so the Opus builder was most of the cost of a run.
+- **On a subscription, cost means rehearsals.** We don't pay per token, but Opus builds use up the usage limits fastest. Our defence against flaky runs is three full rehearsals from an empty registry (§13), so cheaper builds buy rehearsals.
+- **The gate sets the quality bar, not the model.** A weak first build is refused by the harness's own test run and never installed. The worst case of building on Sonnet is an extra repair, not a worse capability in the registry.
+- **Opus goes where it's needed.** A gap whose build the gate refused has shown it's hard (SOAP, a large nested response). The repair also gets the harness's test output, so Opus works with the most context. A gap that passes the first time costs about half what it did. We haven't yet measured how often Sonnet's first builds pass (see §13).
+- **The builder and tester now share a model.** Their independence never depended on the model: they run as separate sessions with separate prompts, the tester writes only `tests/` and the builder can't edit it, and the harness, not either role, runs the tests.
+
+`cheap` is for testing the plumbing (gate, approvals, events, console) without spending the limits. It says nothing about how well the demo models do. `FRANK_MODE=demo` refuses it, like the fakes and the auto approver.
+
+We didn't put the builder on Haiku: the extra repairs would cost more than they save. We didn't put the tester on Haiku in the demo either, because its tests are the gate's evidence and weak tests weaken the gate.
 
 ---
 
@@ -168,7 +191,7 @@ permissions:
   secrets: []                     # names only; values injected by the proxy, never visible
 dependencies: [zeep==4.3.1]
 tests: { unit: tests/test_unit.py, fixtures: tests/fixtures/, live_smoke: tests/test_live.py }
-origin: { task_id: t-0001, session: A, built_by: builder@claude-opus-5-5 }
+origin: { task_id: t-0001, session: A, built_by: builder@claude-sonnet-5-5 }
 uses: []                          # other capabilities it calls (composition)
 ```
 
@@ -298,7 +321,8 @@ Speed up waiting, label it as sped up ("4×"), and **never cut failures**.
 | A government API is down during recording | Fixtures-based tests still pass. Record the live take early (hour 8) and keep it |
 | Hot-loading tools mid-session misbehaves in the SDK | Fallback is the generic `invoke_capability` tool |
 | Flaky LLM behaviour across runs | Three full rehearsals from an empty registry. Low temperature where the SDK allows it. Keep the best *honest* take |
-| Run costs more than expected | `MAX_USD_PER_RUN` stops it. The builder only uses Opus for code, and Haiku judges |
+| Run costs more than expected | `MAX_USD_PER_RUN` stops it. Builds start on Sonnet and only repairs use Opus. Haiku judges. Rehearse the plumbing with `FRANK_MODELS=cheap` |
+| Sonnet's first builds fail the gate much more often than Opus's did | Repairs already run on Opus. If rehearsals show most gaps need a repair, set the builder back to Opus in `TIERS` (one line) |
 | HTTPS interception complexity | Use a CONNECT allowlist (no TLS MITM) for keyless APIs. Gateway mode only for keyed APIs |
 
 ---
