@@ -313,9 +313,11 @@ function renderHeader() {
   // Enforced caps are planner_turns (the planner's own turns) and turns_per_gap (shared by one gap's
   // builder/tester/repairs); the old single "turns" meter tracked a derived run total no cap_hit ever
   // names, so it never lit up red and showed progress against a ceiling nothing actually enforces.
+  // A log recorded before that split has neither in `lim`: skip the meter instead of showing NaN%.
+  const have = (key) => lim[key] != null;
   $("meters").innerHTML = meter("usd", "Spend (API-equivalent)", b.usd, "$" + Number(b.usd).toFixed(2), "$" + lim.usd.toFixed(2))
-    + meter("planner_turns", "Planner turns", b.planner_turns, b.planner_turns, lim.planner_turns)
-    + meter("turns_per_gap", "Builder turns (this gap)", b.gap_turns, b.gap_turns, lim.turns_per_gap)
+    + (have("planner_turns") ? meter("planner_turns", "Planner turns", b.planner_turns ?? 0, b.planner_turns ?? 0, lim.planner_turns) : "")
+    + (have("turns_per_gap") ? meter("turns_per_gap", "Builder turns (this gap)", b.gap_turns ?? 0, b.gap_turns ?? 0, lim.turns_per_gap) : "")
     + meter("gaps", "Gaps this run", b.gaps, b.gaps, lim.gaps)
     + meter("minutes", "Run time", b.minutes, Number(b.minutes).toFixed(1), lim.minutes + " min");
   $("caps").innerHTML = `· also capped: ${lim.repairs_per_gap} repairs per gap${hit.has("repairs_per_gap") ? " " + chip("hit", "bad") : ""}, ${lim.sandbox_seconds} s per sandbox run`;
