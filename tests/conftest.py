@@ -4,7 +4,7 @@ import pytest
 
 from harness import fakes
 from harness.kernel.registry import GitRegistry
-from harness.kernel.sandbox import DockerSandbox
+from harness.kernel.sandbox import DockerSandbox, DockerUnavailable
 from harness.ops.events import EventLog
 
 BUNDLES = Path(__file__).parent / "fixtures" / "bundles"
@@ -22,9 +22,11 @@ def events(tmp_path):
 
 @pytest.fixture(params=["local", "docker"])
 def sandbox(request, tmp_path):
-    sb = fakes.LocalSandbox() if request.param == "local" else DockerSandbox()
     try:
+        sb = fakes.LocalSandbox() if request.param == "local" else DockerSandbox()
         sb.run(tmp_path, ["true"], phase="call")
+    except DockerUnavailable as e:
+        pytest.skip(f"no docker here: {e}")
     except NotImplementedError:
         pytest.skip(f"{type(sb).__name__} not implemented yet")
     return sb
