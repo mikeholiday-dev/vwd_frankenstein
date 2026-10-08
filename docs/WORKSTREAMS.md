@@ -14,7 +14,7 @@ Three people, three workstreams, one repo. The split follows plan §9: **A** ker
 | Path | Owner | State now |
 |---|---|---|
 | `harness/contracts.py`, `config.py`, `wiring.py`, `fakes.py` | shared (PR + 2 approvals) | done |
-| `harness/kernel/limits.py`, `gate.py`, `host.py` | **A** | done: hardened gate, v2 regression tests, `Host.retest`. TODO: prompt_skill, `uses` |
+| `harness/kernel/limits.py`, `gate.py`, `host.py` | **A** | done: hardened gate, v2 regression tests, `Host.retest`, `uses`. TODO: prompt_skill |
 | `harness/kernel/sandbox.py`, `proxy.py`, `registry.py` | **A** | done: Docker sandbox behind the egress proxy, git registry. The default now |
 | `harness/agent/`, `harness/cli.py` | **B** | kernel tools done except `study`; `run_session` stub; empty prompts |
 | `harness/ops/events.py`, `approvals.py` | **C** | done: JSONL log + approval/kill over the log |
@@ -51,7 +51,8 @@ Owns `harness/kernel/`. Doesn't need the agent or the UI.
 3. ✅ `EgressProxy`: CONNECT-only allowlist per container. BUILD and deps installs reach the package index only, TEST and CALL the manifest's exact hosts only.
 4. ✅ Gate hardening: refusals before testing (see "From stream A" below), tests on a throwaway copy, v2 must pass the active version's tests too.
 5. ✅ `Host.retest(name, version=None)`, the "re-run stored tests" primitive. ⚠️ Quarantine doesn't cut a call already in flight (≤ 60 s): proxy tokens live one container, and the host refuses new calls of a quarantined capability.
-6. Next: `uses` (a capability calling another one) in `host.py`; prompt_skill installs (eval cases + judge); rehearsal support.
+6. ✅ `uses`: a capability calls installed ones with `from frank import use` (`harness/kernel/compose.py`). Authority can't grow through it.
+7. Next: prompt_skill installs (eval cases + judge); rehearsal support.
 
 Dev loop: `uv run frank install tests/fixtures/bundles/echo_ok` then `uv run frank call echo '{"text":"hi"}'`.
 
@@ -94,6 +95,16 @@ Everything below is live on `main` once `a/sandbox-registry` merges. Proof for e
 | no symlinks anywhere in the bundle | `refused: bundle contains symlinks` |
 | a v2+ also passes the **active version's stored tests** | `tests failed` (output has `=== previous version's tests ===`) |
 | `dependencies` are package specs, never options like `--index-url` | the test output says `[deps] refused` |
+| every `uses` entry is installed, active and acyclic | `refused: ... uses X, which isn't installed` / `... is quarantined` / `cycle in uses` |
+| what it `uses` (transitively) needs no host, secret or registry access the bundle doesn't declare itself | `refused: ... which needs network [...] that ... doesn't declare` |
+
+### Composition (`uses`)
+
+- Manifest: `uses: ["name"]` (active version at call time) or `"name@vN"` (pinned).
+- Code: `from frank import use`, then `use("name", **args)` returns that capability's `run(**args)` result. Its tests call it the same way: the used bundles are copied next to the code for every test run and call.
+- `frank.py` and `_frank_uses/` are the harness's: the gate drops a bundle's own copies and writes the real ones. To try composed code in `sandbox_exec`, B can write them into the workspace with `compose.vendor(compose.resolve(registry, manifest), workdir)`.
+- It all runs in **one** container under the caller's permissions, so the caller must declare every host its dependencies reach. The approval card shows them.
+- The host re-resolves `uses` on every call. If a used capability is quarantined, or its new active version needs a host the caller doesn't declare, the call fails with that reason. A pinned `name@vN` is immune to upgrades, not to quarantine. `call` events carry `uses: ["name@vN", ...]`.
 
 Refusals come back as `InstallResult(installed=False, reason=..., test_report=None)` and an `install` event. No test runs, nothing reaches the operator.
 
@@ -107,14 +118,16 @@ Refusals come back as `InstallResult(installed=False, reason=..., test_report=No
 
 1. Builder output meets the bundle rules above. For an upgrade, read the active version with `registry_read` and bump to highest installed + 1.
 2. Repair loop: feed it `InstallResult.reason` plus `test_report.output`. A `refused:` reason is a bundle-shape problem, `[egress] refused` lines mean a missing host in the manifest, and `previous version's tests` failures mean the v2 broke v1's behaviour. Keep the prompts generic (rule 2): no hosts or tool names in them.
-3. `capability_doctor` kernel tool: wrap `ctx.host.retest(name, version)`. It returns a `TestReport` and logs `test_run` with `suite="retest"`. It's on `kernel.host.Host`, not yet on the `CapabilityHost` Protocol: add it there in a small PR (optional method, A approves).
-4. Run with the defaults (Docker). Use `FRANK_FAKE=sandbox` only without Docker.
+3. Composition: the builder can reuse an installed capability by listing it in `uses` and calling `use(...)` (see "Composition" above), instead of copying its code. Teach the mechanism generically in the prompt (rule 2: no capability names). A `refused: ... doesn't declare` reason means: add those hosts to `permissions.network`.
+4. `capability_doctor` kernel tool: wrap `ctx.host.retest(name, version)`. It returns a `TestReport` and logs `test_run` with `suite="retest"`. It's on `kernel.host.Host`, not yet on the `CapabilityHost` Protocol: add it there in a small PR (optional method, A approves).
+5. Run with the defaults (Docker). Use `FRANK_FAKE=sandbox` only without Docker.
 
 ### Stream C tasks
 
 1. Lab panel: `test_run` now carries `suite`: `own`, `regression: <name>@v<N> tests`, or `retest`. Show the regression run as its own red/green row. The approval card's `test_report.output` has both suites.
 2. Evidence for "authority may not grow": `test_run` and `call` carry `egress_denied: ["host:port", ...]`. Show refused hosts (red) next to the capability.
 3. `install` events with `reason` starting `refused:` have no test report: render the reason.
+   - `call` events carry `uses: ["name@vN", ...]`, and manifests have `uses`: the registry view can draw "composes" edges (storyboard: session B reusing session A's tools).
 4. Registry view: `registry/` is a git repo. A `git log --format='%h %an %s'` panel shows `frankenstein-agent` as the author of every install (storyboard 0–8 s and 80–90 s). Rollback and quarantine from the UI work as before; they commit as `frankenstein-operator`.
 5. README real/simulated/missing table, add:
    - Real: Docker sandbox (no host env, no home, read-only call mounts, limits); egress proxy (CONNECT allowlist, no TLS interception, so it sees hosts, not URLs).

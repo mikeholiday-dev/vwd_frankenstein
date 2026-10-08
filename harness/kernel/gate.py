@@ -9,6 +9,9 @@ output, asks the operator, and installs. It never trusts a pass/fail claim from 
   version that's already installed or skips one (a new name starts at v1)
 - tests run on a throwaway copy, so what's installed is exactly the snapshot the operator saw
 - v2+: the active version's stored tests also run against the candidate; both suites must pass
+- `uses` (compose.py): every capability it reaches must be installed, active, acyclic and need no
+  permission the bundle doesn't declare itself; they're copied next to the code for every test run.
+  A bundle's own copy of the harness-written `frank.py` / `_frank_uses/` is dropped from the snapshot
 - `run_tests` is shared with Host.retest, the "re-run the stored tests" primitive for capability_doctor
 
 TODO(A): prompt_skill: run eval cases + LLM judge instead of pytest. Refused until then.
@@ -39,17 +42,24 @@ from harness.contracts import (
     TestReport,
     permissions_diff,
 )
+from harness.kernel.compose import RESERVED, UsesError, dependencies, resolve, vendor
 from harness.ops.events import EventLog
 
 NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 
-def run_tests(sandbox: Sandbox, bundle: Path, manifest: Manifest, events: EventLog, suite: str = "own") -> TestReport:
-    """Run `bundle`'s tests in the sandbox on a throwaway copy and log the full output."""
+def run_tests(
+    sandbox: Sandbox, bundle: Path, manifest: Manifest, events: EventLog, suite: str = "own", uses: list[RegistryEntry] = ()
+) -> TestReport:
+    """Run `bundle`'s tests in the sandbox on a throwaway copy, with its resolved `uses` alongside, and log the full output."""
     with tempfile.TemporaryDirectory(prefix=f"test-{manifest.name}-") as tmp:
         work = Path(tmp) / "bundle"
         shutil.copytree(bundle, work, symlinks=True)
-        r = sandbox.run(work, TEST_ARGV, phase=Phase.TEST, network=manifest.permissions.network, deps=manifest.dependencies)
+        vendor(list(uses), work)
+        r = sandbox.run(
+            work, TEST_ARGV, phase=Phase.TEST, network=manifest.permissions.network, deps=dependencies(manifest, list(uses)),
+            registry_ro=manifest.permissions.filesystem == "registry_ro",
+        )
     report = TestReport(
         ref=manifest.ref,
         passed=r.exit_code == 0 and not r.timed_out,
@@ -70,17 +80,26 @@ class Gate:
         with tempfile.TemporaryDirectory(prefix="gate-") as tmp:
             candidate = Path(tmp) / "bundle"
             shutil.copytree(bundle_dir, candidate, symlinks=True)  # snapshot: the agent can't change it mid-run
+            for r in RESERVED:
+                if (candidate / r).is_dir() and not (candidate / r).is_symlink():
+                    shutil.rmtree(candidate / r)
+                else:
+                    (candidate / r).unlink(missing_ok=True)
             try:
                 manifest = Manifest.load(candidate)
             except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
                 return self._refused(Path(bundle_dir).name, f"invalid manifest: {type(e).__name__}: {e}")
             if reason := self._precheck(candidate, manifest):
                 return self._refused(manifest.ref, reason)
+            try:
+                uses = resolve(self.registry, manifest)
+            except UsesError as e:
+                return self._refused(manifest.ref, str(e))
 
             previous = self._active(manifest.name)
-            report = run_tests(self.sandbox, candidate, manifest, self.events)
+            report = run_tests(self.sandbox, candidate, manifest, self.events, uses=uses)
             if report.passed and previous:
-                report = _combined(report, self._regression(candidate, manifest, previous))
+                report = _combined(report, self._regression(candidate, manifest, previous, uses))
             if not report.passed:
                 return self._result(manifest.ref, False, "tests failed", report)
 
@@ -122,13 +141,13 @@ class Gate:
             return f"version must be {expected} (installed: {sorted(installed) or 'none'})"
         return ""
 
-    def _regression(self, candidate: Path, manifest: Manifest, previous: RegistryEntry) -> TestReport:
+    def _regression(self, candidate: Path, manifest: Manifest, previous: RegistryEntry, uses: list[RegistryEntry]) -> TestReport:
         """The candidate's code against the active version's stored tests."""
         with tempfile.TemporaryDirectory(prefix=f"regress-{manifest.name}-") as tmp:
             work = Path(tmp) / "bundle"
             shutil.copytree(candidate, work, symlinks=True, ignore=lambda d, names: [TESTS_DIR] if Path(d) == candidate else [])
             shutil.copytree(previous.path / TESTS_DIR, work / TESTS_DIR)
-            return run_tests(self.sandbox, work, manifest, self.events, suite=f"regression: {previous.manifest.ref} tests")
+            return run_tests(self.sandbox, work, manifest, self.events, suite=f"regression: {previous.manifest.ref} tests", uses=uses)
 
     def _versions(self, name: str) -> set[int]:
         versions, v = set(), 1
