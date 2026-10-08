@@ -13,11 +13,11 @@ const STATUS_TONE = { ok: "ok", failed: "bad", killed: "bad", capped: "warn", un
 const STATUS_LABEL = { ok: "ok", failed: "failed", killed: "killed", capped: "capped", unfinished: "running" };
 const CRED_LABELS = { telegram: "Telegram bot token", discord: "Discord bot token", elevenlabs: "ElevenLabs API key", apify: "Apify API token" };
 
-const S = { config: null, summary: null, registry: [], creds: {}, pending: new Map(), budget: null, caps: [], lastId: -1 };
+const S = { config: null, summary: null, registry: [], versions: new Map(), creds: {}, pending: new Map(), budget: null, caps: [], lastId: -1 };
 
 async function j(url, opts) {
   const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `${url}: ${r.status}`);
   return r.status === 204 ? null : r.json();
 }
 
@@ -128,29 +128,51 @@ function renderRuns() {
 
 // ---- registry -------------------------------------------------------------------------------
 
+// Versions you can switch to: every one below the active, plus any installed later (seen in the log),
+// so after rolling v2 back to v1 you can still go forward to v2.
+function otherVersions(m) {
+  const seen = new Set(S.versions.get(m.name) || []);
+  for (let v = 1; v < m.version; v++) seen.add(v);
+  seen.delete(m.version);
+  return [...seen].sort((a, b) => b - a);
+}
+
 function renderRegistry() {
   $("regCount").textContent = S.registry.length;
   $("regEmpty").hidden = !!S.registry.length;
   const tbody = document.querySelector("#registry tbody");
   tbody.innerHTML = S.registry.map((e) => {
-    const m = e.manifest, q = e.status === "quarantined";
+    const m = e.manifest, q = e.status === "quarantined", others = otherVersions(m);
+    const rollback = others.length
+      ? `<select aria-label="Version to roll back to">${others.map((v) => `<option value="${v}">v${v}</option>`).join("")}</select>
+         <button data-rollback="${esc(m.name)}">Rollback</button>`
+      : "";
     return `<tr class="${q ? "quarantined" : ""}">
       <td class="name">${esc(m.name)}@v${esc(m.version)}</td>
       <td>${q ? chip("quarantined", "bad") : chip("active", "ok")}</td>
       <td class="actions">
-        <button data-rollback="${esc(m.name)}" data-version="${esc(m.version)}">Rollback</button>
+        ${rollback}
         ${q ? "" : `<button class="danger" data-quarantine="${esc(m.name)}">Quarantine</button>`}
       </td>
     </tr>`;
   }).join("");
   tbody.querySelectorAll("[data-rollback]").forEach((b) => b.addEventListener("click", async () => {
-    await j(`/api/registry/${b.dataset.rollback}/rollback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: Number(b.dataset.version) }) });
-    loadRegistry();
+    const version = Number(b.closest("td").querySelector("select").value);
+    await registryAction(`Rollback of ${b.dataset.rollback} to v${version}`, `/api/registry/${encodeURIComponent(b.dataset.rollback)}/rollback`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version }) });
   }));
   tbody.querySelectorAll("[data-quarantine]").forEach((b) => b.addEventListener("click", async () => {
-    await j(`/api/registry/${b.dataset.quarantine}/quarantine`, { method: "POST" });
-    loadRegistry();
+    await registryAction(`Quarantine of ${b.dataset.quarantine}`, `/api/registry/${encodeURIComponent(b.dataset.quarantine)}/quarantine`, { method: "POST" });
   }));
+}
+
+async function registryAction(what, url, opts) {
+  try {
+    await j(url, opts);
+  } catch (e) {
+    banner("bad", `${what} failed: ${e.message}`);
+  }
+  loadRegistry();
 }
 
 // ---- approvals ------------------------------------------------------------------------------
@@ -276,8 +298,17 @@ function onEvent(type, e) {
       refreshSummarySoon();
       break;
     case "install":
+      if (d.installed) {
+        const [name, v] = d.ref.split("@v");
+        if (!S.versions.has(name)) S.versions.set(name, new Set());
+        S.versions.get(name).add(Number(v));
+      }
       loadRegistry();
       refreshSummarySoon();
+      break;
+    case "rollback":
+    case "quarantine":
+      loadRegistry();
       break;
     case "run_started":
     case "run_finished":

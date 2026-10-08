@@ -184,8 +184,11 @@ def registry():
 
 @app.post("/api/registry/{name}/rollback")
 def rollback(name: str, v: Version):
+    reg = make_registry()
     try:
-        entry = make_registry().rollback(name, v.version)
+        if reg.get(name).manifest.version == v.version:
+            raise HTTPException(409, f"{name}@v{v.version} is already the active version")
+        entry = reg.rollback(name, v.version)
     except KeyError:
         raise HTTPException(404, f"{name}@v{v.version} was never installed") from None
     events.emit(EventType.ROLLBACK, name=name, version=v.version, by="operator")
