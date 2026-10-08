@@ -1,6 +1,7 @@
 """`frank` command line. Shared entry point.
 
   frank run --session A "task"     one agent session (one process; session B = run it again)
+  frank run --attach FILE "task"   ...with an input file capability calls can read (repeatable)
   frank install <bundle_dir>       push a hand-made bundle through the gate (kernel smoke test)
   frank call <name> '<json args>'  call an installed capability
   frank registry                   list installed capabilities
@@ -28,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run", parents=[common])
     run.add_argument("task")
+    run.add_argument("--attach", type=Path, action="append", default=[], metavar="FILE", help="input file for this session's capability calls (repeatable)")
     inst = sub.add_parser("install", parents=[common])
     inst.add_argument("bundle", type=Path)
     call = sub.add_parser("call", parents=[common])
@@ -50,10 +52,15 @@ def main(argv: list[str] | None = None) -> int:
 
     from harness.agent.loop import run_session
 
-    ctx.events.emit(EventType.RUN_STARTED, task=a.task, pid=os.getpid(), auth=config.AUTH, registry=[e.manifest.ref for e in ctx.registry.list()])
+    if missing := [str(f) for f in a.attach if not f.is_file()]:
+        p.error(f"--attach: not a file: {', '.join(missing)}")
+    ctx.events.emit(
+        EventType.RUN_STARTED, task=a.task, pid=os.getpid(), auth=config.AUTH,
+        registry=[e.manifest.ref for e in ctx.registry.list()], attached=[f.name for f in a.attach],
+    )  # fmt: skip
     status = "failed"
     try:
-        print(run_session(a.task, ctx))
+        print(run_session(a.task, ctx, attach=a.attach))
         status = "ok"
     except Killed:
         status = "killed"

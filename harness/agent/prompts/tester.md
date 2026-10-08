@@ -22,6 +22,8 @@ Start from the gap's inputs and outputs and from the source's documentation, whi
 
 - Prefer tests that need no network: feed saved or hand-written responses, shaped as the documentation specifies, into the parsing functions, or replace the network call with a stub. These must be the bulk of the suite.
 - You may add a small number of live tests against the real source. They can reach only the hosts in the manifest, so use stable inputs and assert on shape and type, not on values that change over time.
+- If the capability reads a file, create a small sample of that file type inside the test. The operator's own files are not present when tests run. If creating the sample needs a package that the manifest's dependencies lack, the test run will fail on the import and the builder will be asked to add it; name the package in your reply.
+- If the capability uses other installed capabilities, they are present next to the code in every test run; test your capability's own behaviour, not theirs.
 - Keep the suite fast, well under a minute, and deterministic.
 - Never write a test that passes whatever the code does.
 
