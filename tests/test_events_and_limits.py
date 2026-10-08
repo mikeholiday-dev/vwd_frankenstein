@@ -1,7 +1,7 @@
 import pytest
 
 from harness.contracts import EventType
-from harness.kernel.limits import MAX_AGENT_TURNS, Budget, CapExceeded
+from harness.kernel.limits import MAX_PLANNER_TURNS, MAX_TURNS_PER_GAP, Budget, CapExceeded
 from harness.ops.approvals import Killed
 
 
@@ -22,10 +22,26 @@ def test_read_from_resumes_and_skips_partial_lines(events):
 
 def test_turn_cap_logs_and_raises(events):
     budget = Budget(events)
-    with pytest.raises(CapExceeded):
-        for _ in range(MAX_AGENT_TURNS + 1):
+    with pytest.raises(CapExceeded, match="planner_turns"):
+        for _ in range(MAX_PLANNER_TURNS + 1):
             budget.turn()
     assert events.read_from(0)[0][-1].type == EventType.CAP_HIT
+
+
+def test_each_gap_has_its_own_turn_cap(events):
+    budget = Budget(events)
+    for gap in ("gap-a", "gap-b"):  # two full builds fit, and neither eats the planner's turns
+        with budget.building(gap):
+            for _ in range(MAX_TURNS_PER_GAP):
+                budget.turn()
+    budget.turn()
+    assert (budget.planner_turns, budget.turns) == (1, 2 * MAX_TURNS_PER_GAP + 1)
+
+    with budget.building("gap-c"), pytest.raises(CapExceeded, match="turns_per_gap"):
+        for _ in range(MAX_TURNS_PER_GAP + 1):
+            budget.turn()
+    assert events.read_from(0)[0][-1].data["limit"] == "turns_per_gap"
+    assert budget.building_gap is None
 
 
 def test_usd_is_counted_from_tokens(events):

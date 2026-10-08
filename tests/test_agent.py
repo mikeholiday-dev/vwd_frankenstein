@@ -99,6 +99,8 @@ def test_failed_tests_are_repaired(ctx, script):
     assert [e.data["installed"] for e in events_of(ctx, EventType.INSTALL)] == [False, True]
     repair_prompt = next(prompt for role, _, prompt, _ in seen if role == "repair")
     assert "tests failed" in repair_prompt and "assert" in repair_prompt  # the gate's reason and the harness's own test output
+    gap_id = events_of(ctx, EventType.GAP)[0].data["id"]
+    assert ctx.budget.planner_turns == 1 and ctx.budget.gap_turns == {gap_id: 3}  # builder, tester and repair count against the gap
 
 
 def test_repairs_stop_at_the_cap_and_nothing_is_installed(ctx, script):

@@ -166,7 +166,8 @@ class Session:
         upgrade = a.get("upgrade") or None
         self.ctx.events.emit(EventType.GAP, **vars(gap), upgrade=upgrade or "")
         self.ctx.budget.gap()
-        result = self.build(gap, upgrade)
+        with self.ctx.budget.building(gap.id):  # its builder, tester and repairs share one turn budget
+            result = self.build(gap, upgrade)
         out: dict[str, Any] = {"installed": result.installed, "ref": result.ref, "reason": result.reason}
         if result.installed:
             self.built.append(result.ref)
