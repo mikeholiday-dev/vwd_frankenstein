@@ -209,7 +209,7 @@ function apply(e) {
   if (d.fake) r.fake = true;
   S.dirty.add("header").add("lab");
   switch (e.type) {
-    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.registryAtStart = d.registry; S.dirty.add("runs"); break;
+    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.registryAtStart = d.registry; r.attached = d.attached || []; S.dirty.add("runs"); break;
     case "plan": r.plan = d.text; break;
     case "gap": r.lab.push({ kind: "gap", ts: e.ts, d }); break;
     case "study": r.lab.push({ kind: "study", ts: e.ts, d }); break;
@@ -297,7 +297,7 @@ function renderHeader() {
       ${a.reused?.length ? `<div class="muted">Reused ${tags(a.reused)}</div>` : ""}${a.built?.length ? `<div class="muted">Built ${tags(a.built, "add")}</div>` : ""}</div>` : "";
     $("task").className = "";
     $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>`
-      + `<div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}`
+      + `<div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}${r.attached?.length ? `<div class="muted">Attached: ${tags(r.attached)}</div>` : ""}`
       + (r.plan ? `<div style="margin-top:6px"><span class="muted">Plan:</span> ${esc(r.plan)}</div>` : "") + answer;
   }
 

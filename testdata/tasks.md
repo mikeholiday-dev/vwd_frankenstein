@@ -16,4 +16,4 @@ For humans: copy these into `frank run`. Nothing in this folder is shown to Fran
    uv run frank run --session C "Which of my tools reach which domains, when were they last tested, and are any of them broken?"
    ```
 
-`--attach` is stream B's flag (pending); the kernel side is `Host.attach`.
+Attach the invoice with `--attach testdata/invoice_ok.pdf` (kernel side: `Host.attach`; the agent sees only the file name).
