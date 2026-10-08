@@ -1,0 +1,81 @@
+<!doctype html>
+<!-- Owner: D. Same event log and registry as the operator console (ui/), a different
+     surface: fewer build-by-build details, more "configure it, see the outputs" —
+     credentials, aggregate stats and a recent-runs list up front, the console's
+     approval/budget/registry controls still all here. One file per concern
+     (dashboard.css, dashboard.js), no build step, served by channels/web.py. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frankenstein dashboard</title>
+<link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+<header>
+  <h1>Frankenstein</h1>
+  <span id="chips"></span>
+  <span class="spacer"></span>
+  <span id="live" class="chip">connecting…</span>
+  <button id="kill" class="danger">Kill switch</button>
+</header>
+
+<div id="banners" class="banners" hidden></div>
+
+<main class="wrap">
+
+  <section class="tiles" id="tiles" aria-label="Overview"></section>
+
+  <section class="cols">
+    <div class="card">
+      <h2>Runs by status</h2>
+      <div id="statusChart" class="status-chart"></div>
+    </div>
+    <div class="card">
+      <h2>Spend per run <span class="muted">(API-equivalent)</span></h2>
+      <div id="spendChart" class="spend-chart"></div>
+    </div>
+  </section>
+
+  <section class="cols">
+    <div class="stack">
+
+      <div class="card">
+        <h2>Outputs <span id="runsCount" class="count">0</span></h2>
+        <div id="runs" class="muted">No runs yet.</div>
+      </div>
+
+      <div class="card">
+        <h2>Registry <span id="regCount" class="count">0</span></h2>
+        <table id="registry" class="reg-table"><tbody></tbody></table>
+        <div id="regEmpty" class="muted">Empty. Only the agent adds capabilities, through the install gate.</div>
+      </div>
+
+    </div>
+
+    <div class="stack">
+
+      <div class="card">
+        <h2>Approvals <span id="apprCount" class="count">0</span></h2>
+        <div id="approvals" class="muted">Nothing waiting for a decision.</div>
+      </div>
+
+      <div class="card">
+        <h2>Budget <span id="caps" class="muted" style="text-transform:none;letter-spacing:0"></span></h2>
+        <div id="meters" class="meters"></div>
+      </div>
+
+      <div class="card">
+        <h2>Credentials</h2>
+        <p class="muted small">Used only for this process, unless you tick "remember" — a key is never sent anywhere but the service itself, never written into the repo.</p>
+        <div id="creds"></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<script src="/dashboard.js"></script>
+</body>
+</html>

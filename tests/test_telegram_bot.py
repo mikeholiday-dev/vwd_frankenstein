@@ -66,6 +66,18 @@ def make_context(chat_data=None, store=None, args=None):
 # ---- pure helpers ---------------------------------------------------------------------------
 
 
+def test_offered_secrets_is_empty_with_no_keys():
+    assert bot.offered_secrets(CredentialStore()) == {}
+
+
+def test_offered_secrets_maps_store_keys_to_env_names():
+    store = CredentialStore()
+    store.set("apify", "apify-tok")
+    store.set("elevenlabs", "el-key")
+    store.set("telegram", "bot-tok")  # not a vault secret: never offered to the agent
+    assert bot.offered_secrets(store) == {"APIFY_TOKEN": "apify-tok", "ELEVENLABS_API_KEY": "el-key"}
+
+
 def test_quality_defaults_to_cheap():
     assert bot.quality_for({}) == "cheap"
     assert bot.quality_for({"quality": "full"}) == "full"
@@ -114,7 +126,7 @@ async def test_quality_command_with_no_args_reports_current():
 
 @pytest.mark.asyncio
 async def test_handle_task_streams_progress_then_sends_the_answer(monkeypatch):
-    async def fake_run_task(task, *, session, models):
+    async def fake_run_task(task, *, session, models, secrets=None):
         yield Progress("gap", "building a thing")
         yield Progress("install", "installed x@v1")
         yield Progress("answer", "the final answer")
@@ -132,6 +144,23 @@ async def test_handle_task_streams_progress_then_sends_the_answer(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_task_passes_the_stores_secrets_to_run_task(monkeypatch):
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None):
+        captured["secrets"] = secrets
+        yield Progress("finished", "ok")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    store = CredentialStore()
+    store.set("apify", "apify-tok")
+    update = make_update()
+    context = make_context(store=store)
+    await bot.handle_task(update, context, "x")
+    assert captured["secrets"] == {"APIFY_TOKEN": "apify-tok"}
+
+
+@pytest.mark.asyncio
 async def test_handle_task_refuses_a_second_task_while_busy():
     update = make_update()
     context = make_context(chat_data={"busy": True})
@@ -141,7 +170,7 @@ async def test_handle_task_refuses_a_second_task_while_busy():
 
 @pytest.mark.asyncio
 async def test_handle_task_clears_busy_even_if_run_task_raises(monkeypatch):
-    async def fake_run_task(task, *, session, models):
+    async def fake_run_task(task, *, session, models, secrets=None):
         yield Progress("gap", "building")
         raise RuntimeError("boom")
 
@@ -157,7 +186,7 @@ async def test_handle_task_clears_busy_even_if_run_task_raises(monkeypatch):
 async def test_handle_task_posts_an_approval_keyboard(monkeypatch):
     approval = {"id": "req-1", "ref": "x@v1", "manifest": {}, "previous": None, "permissions_diff": {}, "test_report": {}, "code": ""}
 
-    async def fake_run_task(task, *, session, models):
+    async def fake_run_task(task, *, session, models, secrets=None):
         yield Progress("approval_requested", "Needs your approval: x@v1", approval=approval)
         yield Progress("finished", "ok")
 
@@ -175,7 +204,7 @@ async def test_handle_task_posts_an_approval_keyboard(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_task_skips_voice_reply_without_a_key(monkeypatch):
-    async def fake_run_task(task, *, session, models):
+    async def fake_run_task(task, *, session, models, secrets=None):
         yield Progress("answer", "spoken answer")
         yield Progress("finished", "ok")
 
@@ -188,7 +217,7 @@ async def test_handle_task_skips_voice_reply_without_a_key(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_task_sends_voice_when_a_key_is_present(monkeypatch):
-    async def fake_run_task(task, *, session, models):
+    async def fake_run_task(task, *, session, models, secrets=None):
         yield Progress("answer", "spoken answer")
         yield Progress("finished", "ok")
 

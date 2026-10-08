@@ -2,9 +2,16 @@
 
 Deliberately thin: just enough to run one Actor synchronously and get its
 results, through Apify's "run-sync-get-dataset-items" endpoint (no polling, no
-webhook). What this is actually used for in the bot flow is still open — see
-docs/WORKSTREAMS.md's stream D section. A token never reaches this module
-except as an argument.
+webhook). A token never reaches this module except as an argument.
+
+This is a separate, secondary path from the one that matters: stream A's
+harness/kernel/vault.py (gateway mode) and harness/agent/tools.py's study()
+are the real Apify integration — Frankenstein itself searches and can build
+capabilities against it when the operator offers APIFY_TOKEN (see
+channels/telegram/bot.py:offered_secrets, which passes the operator's stored
+token through to a bot-triggered run exactly that way). This module would
+only matter for the bot calling Apify directly, outside of a Frankenstein
+run, which nothing here does yet.
 """
 
 from __future__ import annotations
