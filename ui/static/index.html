@@ -208,7 +208,7 @@ function apply(e) {
   if (d.fake) r.fake = true;
   S.dirty.add("header").add("lab");
   switch (e.type) {
-    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.registryAtStart = d.registry; r.attached = d.attached || []; S.dirty.add("runs"); break;
+    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.models = d.models; r.registryAtStart = d.registry; r.attached = d.attached || []; S.dirty.add("runs"); break;
     case "plan": r.plan = d.text; break;
     case "gap": r.lab.push({ kind: "gap", ts: e.ts, d }); break;
     case "study": r.lab.push({ kind: "study", ts: e.ts, d }); break;
@@ -275,7 +275,8 @@ function renderHeader() {
   const r = current();
   const c = S.config;
   $("mode").innerHTML = !c ? "" : (c.mode === "demo" ? chip("demo mode", "ok") : chip("dev mode"))
-    + (c.fakes.length ? " " + chip("fake " + c.fakes.join(" + "), "warn") : "") + " " + chip("auth: " + c.auth);
+    + (c.fakes.length ? " " + chip("fake " + c.fakes.join(" + "), "warn") : "") + " " + chip("auth: " + c.auth)
+    + (c.models === "cheap" ? " " + chip("models: cheap", "warn") : "");
   $("status").className = "chip " + (r ? STATUS[r.status] || "" : "");
   $("status").textContent = r ? r.status : "idle";
 
@@ -297,6 +298,7 @@ function renderHeader() {
     $("task").className = "";
     $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>`
       + `<div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}${r.attached?.length ? `<div class="muted">Attached: ${tags(r.attached)}</div>` : ""}`
+      + (r.models ? `<div class="muted">Models: ${ioTable(r.models)}</div>` : "")
       + (r.plan ? `<div style="margin-top:6px"><span class="muted">Plan:</span> ${esc(r.plan)}</div>` : "") + answer;
   }
 

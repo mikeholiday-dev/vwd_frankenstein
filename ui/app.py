@@ -47,7 +47,7 @@ def index():
 @app.get("/api/config")
 def settings():
     """What the console shows before any run: the caps and which parts are fakes."""
-    return {"limits": LIMITS, "mode": config.MODE, "fakes": sorted(config.FAKES), "approver": config.APPROVER, "auth": config.AUTH}
+    return {"limits": LIMITS, "mode": config.MODE, "fakes": sorted(config.FAKES), "approver": config.APPROVER, "auth": config.AUTH, "models": config.MODELS}
 
 
 @app.get("/api/events")
