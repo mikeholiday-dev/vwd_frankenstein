@@ -20,7 +20,7 @@ Write these files at the bundle root:
 - validates its inputs and raises a clear exception (`ValueError` for bad input, `LookupError` for not found) instead of returning a guess
 - uses HTTPS only, with a timeout on every request
 - keeps parsing in small pure functions, separate from the network call, so they can be tested against saved responses
-- reads no environment variables and no files outside its own folder, and never prints
+- reads no environment variables and no files outside its own folder, except as described under "Reading the registry", and never prints
 
 `manifest.yaml`
 ```yaml
@@ -36,6 +36,7 @@ permissions:
   filesystem: none                # or registry_ro, only if it reads the capability registry
   secrets: []
 dependencies: []                  # pinned package specs, e.g. name==1.2.3; no options
+test_dependencies: []             # packages only the tests need, e.g. one that writes sample files; calls never get them
 tests: { unit: tests/test_unit.py }
 origin: { built_by: builder }
 uses: []
@@ -53,7 +54,16 @@ A used capability runs with your permissions, not its own. So your manifest must
 
 ## File inputs
 
-A capability that works on a file takes the file's path as a string input and opens it for reading. The operator's files appear under `_frank_inputs/` at call time, and when you run a command in the sandbox while building, so you can look at a real example before deciding how to parse it. Write for the general document type, not for that one file, and never copy the file or its contents into the bundle. The tester has to create sample files of that type inside the tests, so also list in `dependencies` a package that can write that file type.
+A capability that works on a file takes the file's path as a string input and opens it for reading. The operator's files appear under `_frank_inputs/` at call time, and when you run a command in the sandbox while building, so you can look at a real example before deciding how to parse it. Write for the general document type, not for that one file, and never copy the file or its contents into the bundle. The tester has to create sample files of that type inside the tests, so list a package that can write that file type in `test_dependencies`.
+
+## Reading the registry
+
+A capability that answers questions about the installed capabilities themselves declares `filesystem: registry_ro` and reads the registry instead of the network. The registry is a directory named by the `FRANK_REGISTRY` environment variable, mounted read-only:
+- `<name>/` per installed capability, holding its active version's `manifest.yaml`, `capability.py` and `tests/`
+- `_state.json`: `{"<name>": {"active": <version>, "quarantined": <bool>, "installed_at": {"<version>": "<ISO time>"}}}`
+- `_tests.json`: `{"<name>": {"<version>": {"at": "<ISO time>", "passed": <bool>, "suite": "install" or "retest"}}}`, the harness's last test run of each version. A name or a version can be missing from it, and the file itself can be missing.
+
+Read only these files, never write. Its tests build a small sample registry in a temporary directory and point `FRANK_REGISTRY` at it.
 
 ## Permissions
 
@@ -70,7 +80,7 @@ When you are given a failed install, read the reason and the test output before 
 - A refusal saying a used capability needs something your manifest does not declare means: declare it in your `permissions`, since you take on what you use.
 - A line saying a host was refused by egress means the code connects to a host the manifest does not list. Add it only if the code truly needs it.
 - A failure under the previous version's tests means the upgrade changed behaviour that older callers rely on: restore it.
-- A test that fails importing a package it needs: add that package to `dependencies`.
+- A test that fails importing a package it needs: add it to `dependencies` if the code imports it, or to `test_dependencies` if only the tests do.
 - Otherwise fix the code so the tests pass. Never special-case a test's input to make it pass.
 
 When done, reply with one short paragraph: what the capability does, which hosts it needs and why.
