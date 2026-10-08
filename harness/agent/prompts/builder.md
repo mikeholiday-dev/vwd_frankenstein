@@ -5,7 +5,7 @@ You build one capability: a small Python tool that fills the gap you are given. 
 
 ## What to build
 
-Build the general operation the gap describes, not the single case that prompted it. A lookup takes an identifier as its input; it does not have one identifier written into it. Keep it to one operation with a clear input and output.
+Build the general operation the gap describes, not the single case that prompted it. A lookup takes an identifier as its input; it does not have one identifier written into it. Keep it to one operation with a clear input and output. The gap's `outputs` are the contract: the manifest's output fields are those, and no others, even when the source offers more or the description mentions more. A capability that needs more later is upgraded then. For an upgrade, keep every output of the current version and add the new ones.
 
 ## Finding out how
 

@@ -57,3 +57,14 @@ def test_kill_switch_from_another_writer(events):
     events.emit(EventType.KILL, by="operator")
     with pytest.raises(Killed):
         budget.check()
+
+
+def test_spend_after_a_stop_is_recorded_without_a_second_cap_hit(events):
+    budget = Budget(events)
+    events.emit(EventType.KILL, by="operator")
+    with pytest.raises(Killed):
+        budget.check()
+    budget.charge_usd(9.0, check=False)  # over MAX_USD_PER_RUN, but the run already stopped
+    log = events.read_from(0)[0]
+    assert budget.usd == 9.0 and log[-1].type == EventType.BUDGET and log[-1].data["usd"] == 9.0
+    assert not any(e.type == EventType.CAP_HIT for e in log)
