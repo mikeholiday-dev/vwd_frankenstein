@@ -14,6 +14,7 @@ import os
 import sys
 from pathlib import Path
 
+from harness import config
 from harness.contracts import EventType, to_jsonable
 from harness.kernel.limits import CapExceeded
 from harness.ops.approvals import Killed
@@ -49,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from harness.agent.loop import run_session
 
-    ctx.events.emit(EventType.RUN_STARTED, task=a.task, pid=os.getpid(), registry=[e.manifest.ref for e in ctx.registry.list()])
+    ctx.events.emit(EventType.RUN_STARTED, task=a.task, pid=os.getpid(), auth=config.AUTH, registry=[e.manifest.ref for e in ctx.registry.list()])
     status = "failed"
     try:
         print(run_session(a.task, ctx))

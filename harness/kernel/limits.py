@@ -20,6 +20,9 @@ MAX_USD_PER_RUN = 5.0
 MAX_RUN_MINUTES = 20
 MAX_SANDBOX_SECONDS = 60
 
+# "usd" is API-equivalent cost: on a subscription nothing is billed per token,
+# but the cap still bounds how much work one run can do. Prefer charge_usd() with
+# the Agent SDK's reported cost per query; charge() is the fallback from raw usage.
 # USD per million tokens (input, output). Cache reads/writes are charged at the
 # input rate, which overestimates: the safe direction for a cap.
 PRICES_PER_MTOK = {

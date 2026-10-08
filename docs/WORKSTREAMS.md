@@ -22,6 +22,17 @@ Three people, three workstreams, one repo. The split follows plan §9: **A** ker
 | `tests/test_<area>.py` | owner of the area | |
 | `registry/` | **nobody**: only the agent, through the gate | |
 
+## Claude access
+
+No API key from the organisers, so local dev and the demo run on our own subscriptions:
+
+- Each person logs in to Claude Code with **their own** subscription (`claude`, then `/login`). Don't share logins.
+- Keep `ANTHROPIC_API_KEY` **unset**. If it's set, the Agent SDK uses it and bills it. `config.AUTH` says which one is active, and every `run_started` event records it.
+- Every model call goes through `claude-agent-sdk`. The plain `anthropic` client needs an API key.
+- The `$` in `limits.py` and the UI meter is an **API-equivalent estimate**. It's still capped in code, which is what the brief asks for.
+- Subscription usage limits are the real constraint. Builder runs on Opus burn through them fastest, so spread rehearsals across people and don't leave the agent looping.
+- Anything we deploy later switches to an API key. No code change is needed, only the env var.
+
 ## Switches
 
 | Env | Values | Use |

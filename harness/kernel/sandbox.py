@@ -7,7 +7,8 @@ Requirements:
 - one `docker run --rm` per call; image with python 3.12 + uv + pytest (see Dockerfile)
 - mount `workdir` (read-write for build/test, read-only for call); no other host mounts,
   except the registry read-only at /registry when `registry_ro` (and set REGISTRY_ENV=/registry)
-- env: nothing from the host. No ANTHROPIC_API_KEY, ever
+- env: nothing from the host. No ANTHROPIC_API_KEY, ever. No home-dir mounts either:
+  we run on Claude Code subscription logins, so ~/.claude and ~/.config hold credentials
 - network: only via the egress proxy. Register a per-container token with
   proxy.allow(token, network) and set HTTPS_PROXY=http://<token>@<proxy>:<port>.
   BUILD phase → package index only; TEST/CALL → manifest domains only

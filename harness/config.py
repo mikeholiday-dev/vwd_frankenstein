@@ -17,6 +17,11 @@ REGISTRY_DIR = Path(os.environ.get("FRANK_REGISTRY_DIR", ROOT / "registry"))
 WORK_DIR = Path(os.environ.get("FRANK_WORK_DIR", ROOT / "work"))  # agent build workspaces
 
 MODE = os.environ.get("FRANK_MODE", "dev")
+
+# Claude auth. The Agent SDK uses ANTHROPIC_API_KEY when it's set, otherwise the
+# local Claude Code login. Local dev and the demo run on our own subscriptions;
+# anything deployed must use an API key. Recorded in every run_started event.
+AUTH = "api_key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription"
 APPROVER = os.environ.get("FRANK_APPROVER", "cli")
 
 _FAKEABLE = {"sandbox", "registry"}

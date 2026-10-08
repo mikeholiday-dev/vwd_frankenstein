@@ -12,6 +12,11 @@ Contract with the rest of the harness:
 - call ctx.budget.turn()/.gap()/.repair()/.charge(...) and ctx.budget.check() between steps
 - on start, every active capability in ctx.registry is a tool (fresh-session composition)
 - prompts live in prompts/*.md and must pass tests/test_prompt_hygiene.py
+- every model call (planner, builder, tester, judge) goes through claude-agent-sdk,
+  never the plain `anthropic` client: the SDK runs on a subscription login, the
+  plain client needs an API key we don't have (config.AUTH)
+- turn off the SDK's built-in tools (Bash, Read/Write, WebFetch, WebSearch, ...):
+  allow only our own tools, or the agent gets network access and the gap stops being real (plan §4)
 """
 
 from __future__ import annotations

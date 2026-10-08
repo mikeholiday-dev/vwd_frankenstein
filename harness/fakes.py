@@ -34,8 +34,9 @@ from harness.ops.events import EventLog
 
 class LocalSandbox:
     """Runs code in a host subprocess with a scrubbed env: no API key, no network
-    isolation, no filesystem isolation. Fine for team-written fixtures; for
-    agent-written code switch to the Docker sandbox as soon as it exists.
+    isolation, no filesystem isolation, so code can still read your Claude Code
+    login under ~/.claude. Fine for team-written fixtures; for agent-written
+    code switch to the Docker sandbox as soon as it exists.
     """
 
     def run(self, workdir, argv, *, phase, network=(), deps=(), stdin=None, timeout_s=None, registry_ro=False):

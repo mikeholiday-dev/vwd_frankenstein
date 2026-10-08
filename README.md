@@ -21,7 +21,8 @@ Full plan: [03-frankenstein-self-building-agent.md](03-frankenstein-self-buildin
 | Registry | `registry/`, a git repo with one folder per capability and a git tag per version |
 | Log | Append-only JSONL. Every plan, gap, build, test output, approval, install, call and cap hit is logged |
 | UI | FastAPI + SSE + one HTML page: chat, live lab panel, approval cards, registry view, budget meter |
-| Secrets | Only `ANTHROPIC_API_KEY`, on the host. Generated code never sees a key. The proxy injects keys for keyed APIs |
+| Claude auth | Local dev and the demo: each person's own Claude subscription through the Agent SDK (Claude Code login, `ANTHROPIC_API_KEY` unset). Anything deployed: an API key. All model calls go through the Agent SDK so both work |
+| Secrets | Only the Claude login (or key), on the host. Generated code never sees it. The proxy injects keys for keyed APIs |
 
 ## Brief rules we follow
 

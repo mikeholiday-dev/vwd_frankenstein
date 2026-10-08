@@ -190,7 +190,7 @@ A **prompt-skill** (e.g. `supplier_risk_summary`: how to combine registry checks
 | `MAX_GAPS_PER_RUN` | 4 |
 | `MAX_REPAIRS_PER_GAP` | 3 |
 | `MAX_AGENT_TURNS` | 60 |
-| `MAX_USD_PER_RUN` | $5, counted from API usage tokens |
+| `MAX_USD_PER_RUN` | $5 API-equivalent, counted from token usage (we run on subscriptions, see README) |
 | `MAX_RUN_MINUTES` | 20 |
 | `MAX_SANDBOX_SECONDS` | 60 per test or call |
 
@@ -285,6 +285,7 @@ Speed up waiting, label it as sped up ("4×"), and **never cut failures**.
 | Sample invoice PDF, task prompts | Seeded **test data**, not code |
 | Government APIs | Real live calls in the demo. Tests use recorded fixtures for repeatability |
 | Speed | Waiting is sped up in the video and labelled |
+| Model access | Demo runs on a Claude subscription via the Agent SDK, not an API key. `$` figures are API-equivalent estimates from token usage |
 | Known limits | `study` can technically read data (mitigated by the provenance check). Text matching in `find_capability` is basic. The approval gate is one operator. *(Add whatever else is true at the freeze.)* |
 
 ---
