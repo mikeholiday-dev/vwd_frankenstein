@@ -109,3 +109,20 @@ def test_fake_run_stops_on_kill(fake_run):
     EventLog(config.LOG_PATH, session="ui").emit(EventType.KILL, by="operator")
     with pytest.raises(fake_run.Killed):
         run.emit(EventType.PLAN, text="two")
+
+
+def test_fresh_start_moves_everything_aside(tmp_path, monkeypatch):
+    for name, value in (("LOG_PATH", tmp_path / "logs" / "events.jsonl"), ("REGISTRY_DIR", tmp_path / "registry"), ("WORK_DIR", tmp_path / "work")):
+        monkeypatch.setattr(config, name, value)
+    fresh = _load("fresh_start", config.ROOT / "scripts" / "fresh_start.py")
+    archive = tmp_path / "rehearsals"
+    assert fresh.fresh_start(archive=archive) is None
+
+    EventLog(config.LOG_PATH).emit(EventType.KILL, by="operator")
+    fakes.DirRegistry(config.REGISTRY_DIR).install(BUNDLE, Manifest.load(BUNDLE))
+    dest = fresh.fresh_start("take-1", archive=archive)
+
+    assert dest.name.endswith("-take-1")
+    assert (dest / "events.jsonl").read_text().count("\n") == 1
+    assert (dest / "registry").is_dir() and not config.REGISTRY_DIR.exists()
+    assert config.LOG_PATH.read_text() == ""
