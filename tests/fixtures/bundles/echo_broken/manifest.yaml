@@ -1,0 +1,12 @@
+name: echo_broken
+version: 1
+kind: code_tool
+description: Fixture whose test fails, so the gate must refuse it.
+interface:
+  input: {text: string}
+  output: {echo: string}
+permissions: {network: [], filesystem: none, secrets: []}
+dependencies: []
+tests: {unit: tests/test_unit.py}
+origin: {task_id: fixture, session: test}
+uses: []

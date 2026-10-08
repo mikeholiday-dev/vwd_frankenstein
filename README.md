@@ -87,20 +87,48 @@ The demo still needs a **sample invoice PDF** (test data, not code) with supplie
 
 ---
 
-## Repo layout (planned)
+## Repo layout
+
+Three parallel workstreams. Ownership, rules and checkpoints are in **[docs/WORKSTREAMS.md](docs/WORKSTREAMS.md)**.
 
 ```
-harness/          # team-written, trusted: agent loop, sandbox runner, egress proxy,
-                  #   install gate, registry primitives, capability loader, limits.py
-ui/               # FastAPI + SSE operator console
-registry/         # agent-written capabilities only (git repo, tags = versions)
-testdata/         # sample invoices and other seeded test data, no code
-logs/             # JSONL event logs from runs
+harness/
+  contracts.py    # SHARED: data shapes, Protocols, event schema. Change by PR only
+  config.py       # SHARED: paths + FRANK_* env switches
+  wiring.py       # SHARED: picks real vs fake components
+  fakes.py        # SHARED: dev stand-ins (local sandbox, dir registry, cli/auto approver)
+  cli.py          # B: `frank run|install|call|registry`
+  kernel/         # A: sandbox, egress proxy, git registry, install gate, capability host, limits.py
+  agent/          # B: agent loop, kernel tools, builder/tester prompts
+  ops/            # C: JSONL event log, approvals and kill over the log
+ui/               # C: FastAPI + SSE operator console
+scripts/          # C: fake_run.py replays a scripted run for UI work
+tests/            # one file per area; kernel tests run against fakes AND real impls
+testdata/         # C: sample invoices and other seeded test data, no code
+registry/         # agent-written capabilities only (own git repo, gitignored here)
+logs/             # JSONL event log (gitignored)
+work/             # agent build workspaces (gitignored)
 ```
 
 ## Running
 
-*To be filled in once the harness exists.*
+```bash
+uv sync
+uv run pytest                                     # main stays green
+
+# kernel smoke test: push a hand-made bundle through the gate
+uv run frank install tests/fixtures/bundles/echo_ok
+uv run frank call echo '{"text":"ahoj"}'
+
+# operator console
+uv run uvicorn ui.app:app --reload                # http://localhost:8000
+uv run python scripts/fake_run.py                 # scripted run, approve it in the UI
+
+# agent session (stream B; not implemented yet)
+FRANK_APPROVER=ui uv run frank run --session A "Is the supplier with IČO 27082440 ..."
+```
+
+`FRANK_MODE=demo` refuses every fake and the auto approver. Use it for the recorded run.
 
 ## Real vs. simulated vs. missing
 

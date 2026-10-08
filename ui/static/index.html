@@ -1,0 +1,97 @@
+<!doctype html>
+<!-- Owner: C. Bare-bones console that proves the wiring: live log, approval cards,
+     budget, registry, kill switch. Restyle/restructure freely; keep the /api contract. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frankenstein console</title>
+<style>
+  :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#666; --card:#fff; --line:#ddd; --ok:#1a7f37; --bad:#cf222e; --warn:#9a6700; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#999; --card:#1b1b1b; --line:#333; --ok:#3fb950; --bad:#f85149; --warn:#d29922; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
+  header { display:flex; gap:16px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; flex:1; }
+  main { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap:16px; padding:16px; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:12px; min-width:0; }
+  h2 { font-size:13px; text-transform:uppercase; color:var(--muted); margin:0 0 8px; }
+  .ev { border-top:1px solid var(--line); padding:6px 0; }
+  .ev b { font-family:ui-monospace, monospace; font-size:12px; }
+  .ev small { color:var(--muted); }
+  pre { white-space:pre-wrap; word-break:break-word; font-size:12px; max-height:240px; overflow:auto; margin:4px 0; }
+  .card { border:2px solid var(--warn); border-radius:6px; padding:8px; margin-bottom:8px; }
+  .pass { color:var(--ok); } .fail { color:var(--bad); }
+  button { font:inherit; padding:4px 10px; cursor:pointer; }
+  #kill { background:var(--bad); color:#fff; border:0; border-radius:4px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; } td { padding:3px 4px; border-top:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header><h1>Frankenstein</h1><span id="budget">budget: -</span><button id="kill">Kill switch</button></header>
+<main>
+  <section><h2>Log</h2><div id="log"></div></section>
+  <div>
+    <section><h2>Approvals</h2><div id="approvals"><small>none pending</small></div></section>
+    <section style="margin-top:16px"><h2>Registry</h2><table id="registry"></table></section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const pending = new Map();
+
+function summary(e) {
+  const d = e.data;
+  switch (e.type) {
+    case "test_run": return `<span class="${d.passed ? "pass" : "fail"}">${d.passed ? "PASS" : "FAIL"}</span> ${esc(d.ref)}<pre>${esc(d.output)}</pre>`;
+    case "gap": return `${esc(d.gap)} <small>${esc(d.why)}</small>`;
+    case "install": return `${esc(d.ref)}: ${d.installed ? "installed" : "not installed"} (${esc(d.reason)})`;
+    case "call": return `${esc(d.ref)} ${d.ok ? "ok" : "error"} <small>${esc(d.call_id)}</small>`;
+    case "answer": return `<pre>${esc(d.text)}</pre><small>cites ${esc(d.call_ids.join(", "))}</small>`;
+    default: return `<pre>${esc(JSON.stringify(d))}</pre>`;
+  }
+}
+
+function renderApprovals() {
+  if (!pending.size) { $("approvals").innerHTML = "<small>none pending</small>"; return; }
+  $("approvals").innerHTML = [...pending.values()].map((d) => `
+    <div class="card"><b>${esc(d.ref)}</b> ${esc(d.manifest.description)}
+      <div>domains: ${esc(d.manifest.permissions.network.join(", ") || "none")}</div>
+      <div>permissions diff: <code>${esc(JSON.stringify(d.permissions_diff))}</code></div>
+      <div>tests: <span class="${d.test_report.passed ? "pass" : "fail"}">${d.test_report.passed ? "passed" : "failed"}</span></div>
+      <details><summary>code</summary><pre>${esc(d.code)}</pre></details>
+      <button onclick="decide('${d.id}', true)">Approve</button> <button onclick="decide('${d.id}', false)">Reject</button>
+    </div>`).join("");
+}
+
+async function decide(id, approved) {
+  await fetch(`/api/approvals/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved }) });
+}
+
+async function loadRegistry() {
+  const rows = await (await fetch("/api/registry")).json();
+  $("registry").innerHTML = rows.length
+    ? rows.map((r) => `<tr><td>${esc(r.manifest.name)}@v${r.manifest.version}</td><td>${esc(r.status)}</td><td>${esc(r.manifest.permissions.network.join(", "))}</td></tr>`).join("")
+    : "<tr><td>empty</td></tr>";
+}
+
+$("kill").onclick = () => fetch("/api/kill", { method: "POST" });
+
+const es = new EventSource("/api/events");
+const TYPES = ["run_started","plan","gap","study","build","test_run","approval_requested","approval_decided","install","call","answer","budget","cap_hit","rollback","quarantine","kill","error","run_finished"];
+for (const t of TYPES) es.addEventListener(t, (msg) => {
+  const e = JSON.parse(msg.data);
+  if (e.type === "budget") { const d = e.data; $("budget").textContent = `$${d.usd} / ${d.limits.usd} · turns ${d.turns}/${d.limits.turns} · gaps ${d.gaps}/${d.limits.gaps}`; return; }
+  if (e.type === "approval_requested") { pending.set(e.data.id, e.data); renderApprovals(); }
+  if (e.type === "approval_decided") { pending.delete(e.data.request_id); renderApprovals(); }
+  if (["install", "rollback", "quarantine"].includes(e.type)) loadRegistry();
+  const div = document.createElement("div");
+  div.className = "ev";
+  div.innerHTML = `<b>${esc(e.type)}</b> <small>${esc(e.session)} · ${esc(e.ts.slice(11, 19))}</small> ${summary(e)}`;
+  $("log").prepend(div);
+});
+loadRegistry();
+</script>
+</body>
+</html>

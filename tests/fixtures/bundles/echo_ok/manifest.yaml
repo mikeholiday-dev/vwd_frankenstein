@@ -1,0 +1,15 @@
+name: echo
+version: 1
+kind: code_tool
+description: Team-written fixture for kernel tests. Never goes into registry/.
+interface:
+  input: {text: string}
+  output: {echo: string}
+permissions:
+  network: []
+  filesystem: none
+  secrets: []
+dependencies: []
+tests: {unit: tests/test_unit.py}
+origin: {task_id: fixture, session: test}
+uses: []

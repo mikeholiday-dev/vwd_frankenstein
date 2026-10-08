@@ -243,7 +243,7 @@ All three are created from a task, not hardcoded. If the agent solves task 1 wit
 | 8–9.5 | Wipe the registry, run all 3 tasks **three times**, fix flaky parts, record the take | 3 clean runs, including one real repair |
 | 9.5–11 | README (real/simulated/missing, how to run), cut the video, submit in HQ | Submitted **before the freeze** |
 
-**With three people:** (1) harness, sandbox and proxy, (2) agent prompts plus builder/tester/gap, (3) UI, log, video and README. From hour 8, everyone works on rehearsal.
+**With three people:** (1) harness, sandbox and proxy, (2) agent prompts plus builder/tester/gap, (3) UI, log, video and README. From hour 8, everyone works on rehearsal. Ownership, contracts, fakes and checkpoints: [docs/WORKSTREAMS.md](docs/WORKSTREAMS.md).
 
 **Cut order if behind:** prompt-skill → `capability_doctor` → UI polish (fall back to log view + approval) → task 3. **Never cut:** task 1, fresh-session task 2, install gate, caps.
 

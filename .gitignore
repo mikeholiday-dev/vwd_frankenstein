@@ -1,3 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime state written by the harness and the agent
+work/
+# registry/ is its own git repo created by the harness; decide at the freeze how to ship it
+registry/
+
 # Dependencies
 node_modules/
 .pnp
