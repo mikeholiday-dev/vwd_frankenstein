@@ -2,7 +2,7 @@
 
 FRANK_MODE      dev (default) | demo. Demo refuses every fake and the auto approver.
 FRANK_FAKE      comma list of components to replace with fakes: sandbox,registry or "all" / "none".
-                Default: sandbox,registry until stream A's real ones land, then flip the default.
+                Default: none (Docker sandbox + git registry). Dev without Docker: FRANK_FAKE=sandbox.
 FRANK_APPROVER  cli (default) | ui | auto
 """
 
@@ -25,7 +25,7 @@ AUTH = "api_key" if os.environ.get("ANTHROPIC_API_KEY") else "subscription"
 APPROVER = os.environ.get("FRANK_APPROVER", "cli")
 
 _FAKEABLE = {"sandbox", "registry"}
-_fake_env = os.environ.get("FRANK_FAKE", "sandbox,registry")
+_fake_env = os.environ.get("FRANK_FAKE", "none")
 FAKES: set[str] = (
     _FAKEABLE if _fake_env == "all" else set() if _fake_env in ("", "none") else set(_fake_env.split(","))
 )

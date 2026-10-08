@@ -109,7 +109,8 @@ class GitRegistry:
         if path.exists():
             return path
         self._cache.mkdir(parents=True, exist_ok=True)
-        tar = subprocess.run(["git", "archive", "--format=tar", f"refs/tags/{ref}", name], cwd=self.root, capture_output=True, check=True).stdout
+        archive = ["git", "archive", "--format=tar", f"refs/tags/{ref}", name]
+        tar = subprocess.run(archive, cwd=self.root, capture_output=True, check=True).stdout
         tmp = Path(tempfile.mkdtemp(dir=self._cache, prefix=".tmp-"))
         with tarfile.open(fileobj=io.BytesIO(tar)) as t:
             t.extractall(tmp, filter="data")
@@ -129,7 +130,8 @@ class GitRegistry:
         (self.root / STATE_FILE).write_text(json.dumps(state, indent=2) + "\n")
 
     def _tag_exists(self, ref: str) -> bool:
-        return subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{ref}"], cwd=self.root, capture_output=True).returncode == 0
+        verify = ["git", "rev-parse", "-q", "--verify", f"refs/tags/{ref}"]
+        return subprocess.run(verify, cwd=self.root, capture_output=True).returncode == 0
 
     def _commit(self, who: tuple[str, str], message: str, *paths: str) -> None:
         self._git("add", "-A", "--", *paths)

@@ -140,6 +140,7 @@ class SandboxResult:
     duration_s: float
     timed_out: bool = False
     run_id: str = ""  # sandbox run id, so a test report can be traced to the run that produced it
+    egress_denied: list[str] = field(default_factory=list)  # "host:port" the egress proxy refused during this run
 
 
 @dataclass

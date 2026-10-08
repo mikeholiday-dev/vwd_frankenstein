@@ -36,8 +36,8 @@ def test_deps_are_importable(sandbox, tmp_path):
 def test_timed_out_container_is_removed(docker, tmp_path):
     r = docker.run(tmp_path, py("import time; time.sleep(30)"), phase="call", timeout_s=2)
     assert r.timed_out
-    ps = subprocess.run([docker.docker, "ps", "-aq", "--filter", f"name=frank-call-{r.run_id}"], capture_output=True, text=True, env=docker._cli_env)
-    assert ps.stdout.strip() == ""
+    ps = [docker.docker, "ps", "-aq", "--filter", f"name=frank-call-{r.run_id}"]
+    assert subprocess.run(ps, capture_output=True, text=True, env=docker._cli_env).stdout.strip() == ""
 
 
 def test_no_network(docker, tmp_path):
