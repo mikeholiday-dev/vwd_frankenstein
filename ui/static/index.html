@@ -75,7 +75,8 @@
   .kv dt { color:var(--muted); } .kv dd { margin:0; min-width:0; }
   .add { color:var(--ok); font-weight:600; } .del { color:var(--bad); text-decoration:line-through; }
   .tag { display:inline-block; font-family:var(--mono); font-size:12px; padding:0 6px; margin:1px 4px 1px 0; border-radius:4px; background:var(--soft); }
-  .tag.add { background:var(--ok-bg); } .tag.del { background:var(--bad-bg); }
+  .tag.add { background:var(--ok-bg); } .tag.del { background:var(--bad-bg); } .tag.deny { background:var(--bad-bg); color:var(--bad); }
+  .refused { color:var(--bad); font-weight:600; }
   .approval { border:2px solid var(--warn); border-radius:8px; padding:12px; margin-top:10px; }
   .approval:first-of-type { margin-top:0; }
   .approval .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
@@ -115,6 +116,7 @@
     <div class="stack">
       <section><h2>Approvals <span id="apcount" class="count">0</span></h2><div id="approvals"></div></section>
       <section><h2>Registry <span id="regcount" class="count">0</span></h2><div id="registry"></div></section>
+      <section><h2>Registry history <span id="logcount" class="count">0</span></h2><div id="reglog"></div></section>
     </div>
   </div>
 </div>
@@ -125,6 +127,11 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const json = (v) => esc(typeof v === "string" ? v : JSON.stringify(v, null, 2));
 const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour12: false });
 const chip = (text, cls = "") => `<span class="chip ${cls}">${esc(text)}</span>`;
+const tags = (xs, cls = "") => (xs || []).map((x) => `<span class="tag ${cls}">${esc(x)}</span>`).join("");
+const denied = (xs) => xs?.length ? ` <span class="refused">egress refused:</span> ${tags(xs, "deny")}` : "";
+const refused = (reason) => String(reason || "").startsWith("refused:");
+// own | "regression: name@vN tests" | retest (gate.run_tests)
+const suite = (x) => !x || x === "own" ? "" : x === "retest" ? chip("retest", "info") : chip(x.replace(/ tests$/, ""), "info");
 
 // ---- state, all derived from the event log --------------------------------
 const S = {
@@ -136,6 +143,7 @@ const S = {
   operator: [],          // events written by the console (kill, rollback, quarantine, decisions)
   versions: new Map(),   // capability name -> Set of versions seen installed in the log
   registry: [],
+  reglog: [],            // git log of registry/: who wrote each install
   config: null,
   lastId: -1,
   killedAt: null,
@@ -283,7 +291,10 @@ function renderHeader() {
 
   if (r) {
     const started = r.registryAtStart ? `<div class="muted">Registry at start: ${r.registryAtStart.length ? r.registryAtStart.map((x) => `<span class="tag">${esc(x)}</span>`).join("") : "empty"}</div>` : "";
-    const answer = r.answer ? `<div class="answer"><div>${esc(r.answer.text)}</div><div class="muted">Cites ${r.answer.call_ids.length ? r.answer.call_ids.map((x) => `<span class="tag">${esc(x)}</span>`).join("") : "no calls"}</div></div>` : "";
+    const a = r.answer, unverified = a && a.provenance && a.provenance !== "ok";
+    const answer = a ? `<div class="answer"${unverified ? ' style="border-color:var(--bad)"' : ""}><div>${esc(a.text)}</div>
+      <div class="muted">Cites ${a.call_ids.length ? tags(a.call_ids) : "no calls"}${a.provenance ? " " + chip(unverified ? "provenance: " + a.provenance : "provenance checked", unverified ? "bad" : "ok") : ""}</div>
+      ${a.reused?.length ? `<div class="muted">Reused ${tags(a.reused)}</div>` : ""}${a.built?.length ? `<div class="muted">Built ${tags(a.built, "add")}</div>` : ""}</div>` : "";
     $("task").className = "";
     $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>`
       + `<div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}`
@@ -329,18 +340,19 @@ function renderStep(s, c, r) {
     case "test": {
       const last = c.steps.filter((x) => x.type === "test").pop() === s;
       const meta = [d.duration_s != null ? d.duration_s.toFixed(1) + " s" : "", d.sandbox_run_id ? "sandbox run " + d.sandbox_run_id : ""].filter(Boolean).join(" · ");
-      return `<li class="${d.passed ? "pass" : "fail"}">${t} ${chip(d.passed ? "tests passed" : "tests failed", d.passed ? "ok" : "bad")} <span class="muted">${esc(meta)}</span>
+      return `<li class="${d.passed ? "pass" : "fail"}">${t} ${suite(d.suite)} ${chip(d.passed ? "tests passed" : "tests failed", d.passed ? "ok" : "bad")} <span class="muted">${esc(meta)}</span>${denied(d.egress_denied)}
         ${details(`test-${s.id}`, "test output", `<pre>${esc(d.output)}</pre>`, last || !d.passed)}</li>`;
     }
     case "request": return `<li class="wait">${t} approval requested from the operator</li>`;
     case "decision":
       return `<li class="${d.approved ? "pass" : "fail"}">${t} ${chip(d.approved ? "approved" : "rejected", d.approved ? "ok" : "bad")} by ${esc(d.by)}${d.reason ? ` · “${esc(d.reason)}”` : ""}</li>`;
     case "install":
-      return `<li class="${d.installed ? "pass" : "fail"}">${t} ${chip(d.installed ? "installed" : "not installed", d.installed ? "ok" : "bad")} <span class="muted">${esc(d.reason)}</span></li>`;
+      return `<li class="${d.installed ? "pass" : "fail"}">${t} ${chip(d.installed ? "installed" : refused(d.reason) ? "refused by the gate" : "not installed", d.installed ? "ok" : "bad")}
+        <span class="${refused(d.reason) ? "refused" : "muted"}">${esc(d.reason)}</span></li>`;
     case "call": {
       const body = `<pre>${json({ args: d.args, output: d.output, error: d.error || undefined })}</pre>`;
       return `<li class="${d.ok ? "pass" : "fail"}">${t} call <span class="tag">${esc(d.call_id)}</span> ${chip(d.ok ? "ok" : "error", d.ok ? "ok" : "bad")}
-        ${d.duration_s != null ? `<span class="muted">${d.duration_s.toFixed(2)} s</span>` : ""}${details(`call-${s.id}`, "arguments and output", body)}</li>`;
+        ${d.duration_s != null ? `<span class="muted">${d.duration_s.toFixed(2)} s</span>` : ""}${d.uses?.length ? ` <span class="muted">uses</span> ${tags(d.uses)}` : ""}${denied(d.egress_denied)}${details(`call-${s.id}`, "arguments and output", body)}</li>`;
     }
   }
   return "";
@@ -356,9 +368,13 @@ function renderLab() {
       const d = x.d;
       return `<div class="item gap"><div class="head">${chip("gap", "info")} <span>${esc(d.gap)}</span> <span class="muted">${clock(x.ts)}</span></div>
         <dl class="kv"><dt>Why</dt><dd>${esc(d.why)}</dd><dt>Needs</dt><dd>${ioTable(d.inputs)}</dd><dt>Returns</dt><dd>${ioTable(d.outputs)}</dd>
-        <dt>Kind</dt><dd>${esc(d.kind)}</dd>${d.registry_search ? `<dt>Registry search</dt><dd>${esc(d.registry_search)}</dd>` : ""}</dl></div>`;
+        <dt>Kind</dt><dd>${esc(d.kind)}</dd>${d.upgrade ? `<dt>Upgrade of</dt><dd><span class="tag">${esc(d.upgrade)}</span></dd>` : ""}${d.registry_search ? `<dt>Registry search</dt><dd>${esc(d.registry_search)}</dd>` : ""}</dl></div>`;
     }
-    if (x.kind === "study") return `<div class="item"><div class="head">${chip("study")} <span>${esc(x.d.query)}</span> <span class="muted">${clock(x.ts)}</span></div></div>`;
+    if (x.kind === "study") {
+      const d = x.d, failed = d.ok === false;
+      return `<div class="item"><div class="head">${chip("study", failed ? "bad" : "")} <span>${esc(d.query)}</span> <span class="muted">${clock(x.ts)}</span></div>
+        ${d.url ? `<div class="muted mono">${esc(d.url)}${d.chars != null ? ` · ${esc(d.chars)} chars` : ""}${failed ? " · failed" : ""}</div>` : ""}</div>`;
+    }
     const tone = { green: "ok", red: "bad", wait: "warn" }[x.tone] || "";
     const files = [...x.files].map(([name, f]) =>
       details(`file-${r.id}-${x.ref}-${name}`, `<span class="mono">${esc(name)}</span>${f.attempt ? ` <span class="muted">from ${esc(f.role)}, attempt ${esc(f.attempt)}</span>` : ""}`, `<pre>${esc(f.text)}</pre>`)).join("");
@@ -418,10 +434,19 @@ function renderRegistry() {
       ? `<select id="rb-${esc(m.name)}" aria-label="Version to roll back to">${others.map((v) => `<option value="${v}">v${v}</option>`).join("")}</select> <button data-act="rollback" data-name="${esc(m.name)}">Roll back</button> `
       : "";
     return `<tr class="${q ? "quarantined" : ""}"><td><span class="mono name">${esc(m.name)}@v${esc(m.version)}</span> ${q ? chip("quarantined", "bad") : chip("active", "ok")}
-        <div class="muted">${esc(m.description)}</div><div class="muted">${e.installed_at ? "installed " + esc(e.installed_at.replace("T", " ").slice(0, 16)) : ""}</div></td>
+        <div class="muted">${esc(m.description)}</div>${m.uses?.length ? `<div class="muted">composes ${tags(m.uses)}</div>` : ""}<div class="muted">${e.installed_at ? "installed " + esc(e.installed_at.replace("T", " ").slice(0, 16)) : ""}</div></td>
       <td>${(m.permissions.network || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("") || "<span class='muted'>no network</span>"}</td>
       <td class="actions">${rollback}${q ? "" : `<button data-act="quarantine" data-name="${esc(m.name)}">Quarantine</button>`}</td></tr>`;
   }).join("") + "</table>";
+}
+
+function renderRegistryLog() {
+  $("logcount").textContent = S.reglog.length;
+  if (!S.reglog.length) { $("reglog").innerHTML = "<span class='muted'>No git history (fake registry, or none yet).</span>"; return; }
+  const who = { "frankenstein-agent": "info", "frankenstein-operator": "warn" };
+  $("reglog").innerHTML = `<table>${S.reglog.map((c) => `<tr><td class="mono">${esc(c.sha)}</td><td>${chip(c.author, who[c.author] || "")}</td>
+    <td>${esc(c.subject)}${c.refs ? ` ${tags(c.refs.split(", ").filter((x) => x.startsWith("tag: ")).map((x) => x.slice(5)))}` : ""}
+    <div class="muted">${esc(c.date.replace("T", " ").slice(0, 19))}</div></td></tr>`).join("")}</table>`;
 }
 
 function line(e) {
@@ -432,11 +457,11 @@ function line(e) {
     case "gap": return `${esc(d.gap)} <span class="muted">${esc(d.why)}</span>`;
     case "study": return esc(d.query);
     case "build": return `${esc(d.ref)} · ${esc(d.role)} attempt ${esc(d.attempt)}`;
-    case "test_run": return `${chip(d.passed ? "pass" : "fail", d.passed ? "ok" : "bad")} ${esc(d.ref)}`;
+    case "test_run": return `${chip(d.passed ? "pass" : "fail", d.passed ? "ok" : "bad")} ${esc(d.ref)} ${suite(d.suite)}${denied(d.egress_denied)}`;
     case "approval_requested": return `${esc(d.ref)} waits for the operator`;
     case "approval_decided": return `${chip(d.approved ? "approved" : "rejected", d.approved ? "ok" : "bad")} by ${esc(d.by)}${d.reason ? ` · “${esc(d.reason)}”` : ""}`;
-    case "install": return `${esc(d.ref)} ${d.installed ? "installed" : "not installed"} <span class="muted">${esc(d.reason)}</span>`;
-    case "call": return `${esc(d.ref)} ${chip(d.ok ? "ok" : "error", d.ok ? "ok" : "bad")} <span class="tag">${esc(d.call_id)}</span>`;
+    case "install": return `${esc(d.ref)} ${d.installed ? "installed" : "not installed"} <span class="${refused(d.reason) ? "refused" : "muted"}">${esc(d.reason)}</span>`;
+    case "call": return `${esc(d.ref)} ${chip(d.ok ? "ok" : "error", d.ok ? "ok" : "bad")} <span class="tag">${esc(d.call_id)}</span>${denied(d.egress_denied)}`;
     case "answer": return esc(d.text);
     case "budget": return `<span class="muted">$${esc(d.usd)} · ${esc(d.turns)} turns · ${esc(d.gaps)} gaps · ${esc(d.minutes)} min</span>`;
     case "cap_hit": return `${chip("cap hit", "bad")} ${esc(d.limit)} = ${esc(d.value)} (max ${esc(d.max)})`;
@@ -470,6 +495,7 @@ function schedule() {
     if (has("lab")) renderLab();
     if (has("approvals")) renderApprovals();
     if (has("registry")) renderRegistry();
+    if (has("reglog")) renderRegistryLog();
     if (has("timeline")) renderTimeline();
     S.dirty.clear();
   });
@@ -495,8 +521,10 @@ async function post(url, body) {
 
 async function loadRegistry() {
   try {
-    S.registry = await (await fetch("/api/registry")).json();
-    S.dirty.add("registry");
+    const [reg, log] = await Promise.all([fetch("/api/registry"), fetch("/api/registry/log")]);
+    S.registry = await reg.json();
+    S.reglog = await log.json();
+    S.dirty.add("registry").add("reglog");
     schedule();
   } catch { /* the stream indicator already shows a dead server */ }
 }

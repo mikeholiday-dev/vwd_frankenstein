@@ -110,10 +110,10 @@ class Run:
         minutes = round((time.monotonic() - self.started) * self.speed / 60 + self.turns * 0.3, 1)
         self.emit(EventType.BUDGET, 0.1, usd=round(self.usd, 3), turns=self.turns, gaps=self.gaps, minutes=minutes, limits=LIMITS)
 
-    def test(self, ref: str, passed: bool, output: str) -> TestReport:
+    def test(self, ref: str, passed: bool, output: str, suite: str = "own", egress_denied: tuple[str, ...] = ()) -> TestReport:
         report = TestReport(ref=ref, passed=passed, exit_code=0 if passed else 1, output=output, duration_s=1.9 if passed else 2.1,
                             sandbox_run_id=f"fake-{uuid.uuid4().hex[:6]}")
-        self.emit(EventType.TEST_RUN, 1.5, **vars(report))
+        self.emit(EventType.TEST_RUN, 1.5, **vars(report), suite=suite, egress_denied=list(egress_denied))
         return report
 
     def approve(self, manifest: dict, previous: dict | None, report: TestReport, code: str) -> bool:
@@ -152,9 +152,10 @@ def task1(r: Run) -> str:
     if not approved:
         return "failed"
     r.emit(EventType.CALL, call_id="call-fake01", ref=ref, ok=True, duration_s=0.4, args={"ico": "27082440"},
-           output={"name": "Example a.s.", "address": "Example street 1, Prague", "vat_id": "CZ27082440"})
+           output={"name": "Example a.s.", "address": "Example street 1, Prague", "vat_id": "CZ27082440"}, egress_denied=[], uses=[])
     r.budget()
-    r.emit(EventType.ANSWER, text="Example a.s., registered at Example street 1, Prague. (fake run)", call_ids=["call-fake01"])
+    r.emit(EventType.ANSWER, text="Example a.s., registered at Example street 1, Prague. (fake run)", call_ids=["call-fake01"],
+           provenance="ok", reused=[], built=[ref])
     return "ok"
 
 
@@ -164,26 +165,29 @@ def upgrade(r: Run) -> str:
     r.emit(EventType.PLAN, text="1. find installed capabilities  2. look up the supplier  3. match the invoice bank account  4. answer")
     r.budget()
     r.emit(EventType.CALL, call_id="call-fake02", ref="company_lookup@v1", ok=True, duration_s=0.4, args={"ico": "27082440"},
-           output={"name": "Example a.s.", "address": "Example street 1, Prague", "vat_id": "CZ27082440"})
+           output={"name": "Example a.s.", "address": "Example street 1, Prague", "vat_id": "CZ27082440"}, egress_denied=[], uses=[])
     r.emit(EventType.GAP, gap="list a company's published bank accounts", why="company_lookup@v1 returns no bank accounts",
            inputs={"ico": "string, 8 digits"}, outputs=MANIFEST_V2["interface"]["output"], kind=Kind.CODE_TOOL,
-           registry_search="company_lookup@v1 is the closest match; upgrade it instead of building a new tool")
+           registry_search="company_lookup@v1 is the closest match; upgrade it instead of building a new tool", upgrade="company_lookup")
     r.budget(gaps=1, usd=0.03)
     r.emit(EventType.STUDY, query="published bank accounts of registered VAT payers")
-    r.emit(EventType.BUILD, ref=ref, role="builder", attempt=1, files=["capability.py", "manifest.yaml"], contents={"capability.py": CODE_V2})
-    r.emit(EventType.BUILD, ref=ref, role="tester", attempt=1, files=["tests/test_unit.py", "tests/test_v1_regression.py"])
+    r.emit(EventType.BUILD, ref=ref, role="builder", attempt=1, files=["company_lookup.py", "manifest.yaml"])
+    r.emit(EventType.BUILD, ref=ref, role="tester", attempt=1, files=["tests/test_unit.py", "tests/test_bank_accounts.py"])
+    r.emit(EventType.INSTALL, ref=ref, installed=False, reason="refused: missing capability.py")
+    r.emit(EventType.BUILD, ref=ref, role="repair", attempt=2, files=["capability.py"], contents={"capability.py": CODE_V2})
     r.budget(turns=4, usd=0.52)
-    report = r.test(ref, True, ".....\n5 passed in 2.4s (3 carried over from v1)")
+    r.test(ref, True, "....\n4 passed in 2.4s")
+    report = r.test(ref, True, "...\n3 passed in 1.8s", suite="regression: company_lookup@v1 tests")
     approved = r.approve(MANIFEST_V2, MANIFEST, report, CODE_V2)
     r.emit(EventType.INSTALL, ref=ref, installed=approved, reason="approved by operator" if approved else "rejected by operator")
     if not approved:
         r.emit(EventType.ERROR, message="upgrade rejected; company_lookup@v1 stays active and the bank account can't be verified")
         return "failed"
     r.emit(EventType.CALL, call_id="call-fake03", ref=ref, ok=True, duration_s=0.6, args={"ico": "27082440"},
-           output={"name": "Example a.s.", "bank_accounts": ["123456789/0100"]})
+           output={"name": "Example a.s.", "bank_accounts": ["123456789/0100"]}, egress_denied=[], uses=[])
     r.budget()
     r.emit(EventType.ANSWER, text="The invoice account 123456789/0100 is one of the supplier's published accounts. (fake run)",
-           call_ids=["call-fake02", "call-fake03"])
+           call_ids=["call-fake02", "call-fake03"], provenance="ok", reused=["company_lookup@v1"], built=[ref])
     return "ok"
 
 
@@ -198,7 +202,10 @@ def capped(r: Run) -> str:
     r.emit(EventType.BUILD, ref=ref, role="builder", attempt=1, files=["capability.py", "manifest.yaml"])
     r.emit(EventType.BUILD, ref=ref, role="tester", attempt=1, files=["tests/test_unit.py"])
     r.budget(turns=3, usd=0.4)
-    for attempt in range(2, MAX_REPAIRS_PER_GAP + 3):
+    r.test(ref, False, "[egress] refused rates.example:443: not in this capability's allowlist\nFF\n2 failed", egress_denied=("rates.example:443",))
+    r.emit(EventType.BUILD, ref=ref, role="repair", attempt=2, files=["manifest.yaml"])
+    r.budget(turns=2, usd=0.25)
+    for attempt in range(3, MAX_REPAIRS_PER_GAP + 3):
         r.test(ref, False, "F.\nFAILED tests/test_unit.py::test_decimal_comma - could not convert string to float: '24,400'\n1 failed, 1 passed")
         if attempt - 1 > MAX_REPAIRS_PER_GAP:
             r.emit(EventType.CAP_HIT, limit="repairs_per_gap", value=attempt - 1, max=MAX_REPAIRS_PER_GAP)
