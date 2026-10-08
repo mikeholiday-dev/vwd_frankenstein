@@ -52,8 +52,7 @@
 
   .task { font-size:15px; font-weight:600; margin-bottom:6px; }
   .answer { margin-top:10px; border-left:3px solid var(--ok); padding:2px 0 2px 10px; }
-  .meters { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; }
-  @media (max-width:700px) { .meters { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .meters { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; }
   .meter .label { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
   .meter .value { font-size:18px; font-weight:650; font-variant-numeric:tabular-nums; }
   .meter .value small { font-size:12px; font-weight:400; color:var(--muted); }
@@ -303,7 +302,7 @@ function renderHeader() {
 
   const lim = r?.budget?.limits || c?.limits;
   if (!lim) return;
-  const b = r?.budget || { usd: 0, turns: 0, gaps: 0, minutes: 0 };
+  const b = r?.budget || { usd: 0, turns: 0, planner_turns: 0, gap_turns: 0, gaps: 0, minutes: 0 };
   const hit = new Set((r?.caps || []).map((h) => h.limit));
   const meter = (key, label, value, shown, unit) => {
     const pct = Math.min(100, (value / lim[key]) * 100);
@@ -311,8 +310,12 @@ function renderHeader() {
     return `<div class="meter ${cls}"><div class="label"><span>${label}</span><span>${Math.round(pct)}%</span></div>
       <div class="value">${shown} <small>/ ${unit}</small></div><div class="bar"><i style="width:${pct}%"></i></div></div>`;
   };
+  // Enforced caps are planner_turns (the planner's own turns) and turns_per_gap (shared by one gap's
+  // builder/tester/repairs); the old single "turns" meter tracked a derived run total no cap_hit ever
+  // names, so it never lit up red and showed progress against a ceiling nothing actually enforces.
   $("meters").innerHTML = meter("usd", "Spend (API-equivalent)", b.usd, "$" + Number(b.usd).toFixed(2), "$" + lim.usd.toFixed(2))
-    + meter("turns", "Agent turns", b.turns, b.turns, lim.turns)
+    + meter("planner_turns", "Planner turns", b.planner_turns, b.planner_turns, lim.planner_turns)
+    + meter("turns_per_gap", "Builder turns (this gap)", b.gap_turns, b.gap_turns, lim.turns_per_gap)
     + meter("gaps", "Gaps this run", b.gaps, b.gaps, lim.gaps)
     + meter("minutes", "Run time", b.minutes, Number(b.minutes).toFixed(1), lim.minutes + " min");
   $("caps").innerHTML = `· also capped: ${lim.repairs_per_gap} repairs per gap${hit.has("repairs_per_gap") ? " " + chip("hit", "bad") : ""}, ${lim.sandbox_seconds} s per sandbox run`;

@@ -91,6 +91,8 @@ class Run:
         self.speed, self.auto = speed, auto
         self.usd = 0.0
         self.turns = 0
+        self.planner_turns = 0
+        self.gap_turns = 0
         self.gaps = 0
         self.started = time.monotonic()
         self._kill_offset = self.log.end()
@@ -103,12 +105,20 @@ class Run:
                 raise Killed(e.data["by"])
         self.log.emit(type, fake=True, **data)
 
-    def budget(self, turns: int = 1, usd: float = 0.02, gaps: int = 0) -> None:
+    def budget(self, turns: int = 1, usd: float = 0.02, gaps: int = 0, building: bool = False) -> None:
+        """`building=True` for a builder/tester/repair turn, counted against the active gap, like the
+        real Budget.building(); the console's meters show planner_turns and gap_turns, not the old `turns`."""
         self.turns += turns
         self.gaps += gaps
         self.usd += usd
+        if building:
+            self.gap_turns += turns
+        else:
+            self.planner_turns += turns
+            self.gap_turns = 0
         minutes = round((time.monotonic() - self.started) * self.speed / 60 + self.turns * 0.3, 1)
-        self.emit(EventType.BUDGET, 0.1, usd=round(self.usd, 3), turns=self.turns, gaps=self.gaps, minutes=minutes, limits=LIMITS)
+        self.emit(EventType.BUDGET, 0.1, usd=round(self.usd, 3), turns=self.turns, planner_turns=self.planner_turns,
+                  gap_turns=self.gap_turns, gaps=self.gaps, minutes=minutes, limits=LIMITS)
 
     def test(self, ref: str, passed: bool, output: str, suite: str = "own", egress_denied: tuple[str, ...] = ()) -> TestReport:
         report = TestReport(ref=ref, passed=passed, exit_code=0 if passed else 1, output=output, duration_s=1.9 if passed else 2.1,
@@ -142,10 +152,10 @@ def task1(r: Run) -> str:
            contents={"capability.py": CODE_V1_BROKEN})
     r.emit(EventType.BUILD, ref=ref, role="tester", attempt=1, files=["tests/test_unit.py", "tests/fixtures/ok.json"],
            contents={"tests/test_unit.py": TESTS})
-    r.budget(turns=3, usd=0.41)
+    r.budget(turns=3, usd=0.41, building=True)
     r.test(ref, False, RED)
     r.emit(EventType.BUILD, ref=ref, role="repair", attempt=2, files=["capability.py"], contents={"capability.py": CODE_V1})
-    r.budget(turns=2, usd=0.22)
+    r.budget(turns=2, usd=0.22, building=True)
     report = r.test(ref, True, "...\n3 passed in 1.9s")
     approved = r.approve(MANIFEST, None, report, CODE_V1)
     r.emit(EventType.INSTALL, ref=ref, installed=approved, reason="approved by operator" if approved else "rejected by operator")
@@ -175,7 +185,7 @@ def upgrade(r: Run) -> str:
     r.emit(EventType.BUILD, ref=ref, role="tester", attempt=1, files=["tests/test_unit.py", "tests/test_bank_accounts.py"])
     r.emit(EventType.INSTALL, ref=ref, installed=False, reason="refused: missing capability.py")
     r.emit(EventType.BUILD, ref=ref, role="repair", attempt=2, files=["capability.py"], contents={"capability.py": CODE_V2})
-    r.budget(turns=4, usd=0.52)
+    r.budget(turns=4, usd=0.52, building=True)
     r.test(ref, True, "....\n4 passed in 2.4s")
     report = r.test(ref, True, "...\n3 passed in 1.8s", suite="regression: company_lookup@v1 tests")
     approved = r.approve(MANIFEST_V2, MANIFEST, report, CODE_V2)
@@ -201,10 +211,10 @@ def capped(r: Run) -> str:
     r.budget(gaps=1, usd=0.03)
     r.emit(EventType.BUILD, ref=ref, role="builder", attempt=1, files=["capability.py", "manifest.yaml"])
     r.emit(EventType.BUILD, ref=ref, role="tester", attempt=1, files=["tests/test_unit.py"])
-    r.budget(turns=3, usd=0.4)
+    r.budget(turns=3, usd=0.4, building=True)
     r.test(ref, False, "[egress] refused rates.example:443: not in this capability's allowlist\nFF\n2 failed", egress_denied=("rates.example:443",))
     r.emit(EventType.BUILD, ref=ref, role="repair", attempt=2, files=["manifest.yaml"])
-    r.budget(turns=2, usd=0.25)
+    r.budget(turns=2, usd=0.25, building=True)
     for attempt in range(3, MAX_REPAIRS_PER_GAP + 3):
         r.test(ref, False, "F.\nFAILED tests/test_unit.py::test_decimal_comma - could not convert string to float: '24,400'\n1 failed, 1 passed")
         if attempt - 1 > MAX_REPAIRS_PER_GAP:
@@ -212,7 +222,7 @@ def capped(r: Run) -> str:
             r.emit(EventType.ERROR, message=f"{ref} still fails its tests after {MAX_REPAIRS_PER_GAP} repairs; nothing was installed")
             return "capped"
         r.emit(EventType.BUILD, ref=ref, role="repair", attempt=attempt, files=["capability.py"])
-        r.budget(turns=2, usd=0.25)
+        r.budget(turns=2, usd=0.25, building=True)
     return "capped"
 
 
