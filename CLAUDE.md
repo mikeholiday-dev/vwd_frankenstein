@@ -13,6 +13,7 @@ Hackathon, code freeze at sunrise. Prefer the simplest thing that works and keep
 | A, kernel | `harness/kernel/` | `a/` |
 | B, agent | `harness/agent/`, `harness/cli.py` | `b/` |
 | C, console + delivery | `ui/`, `harness/ops/`, `scripts/`, `testdata/`, `README.md` | `c/` |
+| D, channels | `channels/` | `d/` |
 
 Work out the stream from `CLAUDE.local.md` (personal, gitignored, e.g. `I'm on stream B`), then from the branch prefix. If neither tells you, ask.
 
