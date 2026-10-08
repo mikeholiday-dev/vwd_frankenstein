@@ -19,7 +19,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -39,11 +39,7 @@ store = CredentialStore()
 events = EventLog(config.LOG_PATH, session="web")
 STATIC = Path(__file__).parent / "static"
 _background_tasks: set[asyncio.Task] = set()  # keeps a reference so asyncio doesn't GC a running task
-
-
-class NewTask(BaseModel):
-    task: str
-    models: str = "cheap"
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # generous for an invoice PDF; a hard stop against a pathological upload
 
 
 class SetCredential(BaseModel):
@@ -137,25 +133,51 @@ def summary():
 
 
 @app.post("/api/tasks")
-async def new_task(body: NewTask):
+async def new_task(task: str = Form(...), models: str = Form("cheap"), files: list[UploadFile] = File(default=[])):
     """Start a task the same way the Telegram bot or `frank run` at a terminal would — one
     subprocess, through channels.runner.run_task. Its progress isn't streamed back here: the
     dashboard's existing /api/events feed and /api/summary polling already pick it up from
-    the shared event log, the same way they show a run started from anywhere else."""
-    task = body.task.strip()
+    the shared event log, the same way they show a run started from anywhere else.
+
+    Multipart, not JSON, so the same request can carry attached files — channels.runner.run_task
+    already takes `attach`, the same list of paths --attach FILE builds for the CLI; this just
+    gives the dashboard a way to put a file there too, like task 2's invoice PDF."""
+    task = task.strip()
     if not task:
         raise HTTPException(400, "task is empty")
-    if body.models not in ("cheap", "full"):
+    if models not in ("cheap", "full"):
         raise HTTPException(400, "models must be 'cheap' or 'full'")
     session = f"web-{uuid.uuid4().hex[:8]}"
-    t = asyncio.create_task(_drain(session, task, body.models))
+    attach = await _save_uploads(session, files)
+    t = asyncio.create_task(_drain(session, task, models, attach))
     _background_tasks.add(t)
     t.add_done_callback(_background_tasks.discard)
     return {"session": session}
 
 
-async def _drain(session: str, task: str, models: str) -> None:
-    async for _ in runner.run_task(task, session=session, models=models, secrets=offered_secrets(store)):
+async def _save_uploads(session: str, files: list[UploadFile]) -> list[Path]:
+    """Writes each upload under work/uploads/<session>/<name> — the subprocess's own workdir
+    tree, so it's cleaned up the same way other per-run build state is. Filenames are taken by
+    basename only (Path(...).name strips any directory components a browser might send), so an
+    upload can never write outside that folder."""
+    named = [f for f in files if f.filename]
+    if not named:
+        return []
+    upload_dir = config.WORK_DIR / "uploads" / session
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    attach = []
+    for f in named:
+        data = await f.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(400, f"{f.filename}: larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+        dest = upload_dir / Path(f.filename).name
+        dest.write_bytes(data)
+        attach.append(dest)
+    return attach
+
+
+async def _drain(session: str, task: str, models: str, attach: list[Path]) -> None:
+    async for _ in runner.run_task(task, session=session, models=models, attach=attach, secrets=offered_secrets(store)):
         pass
 
 

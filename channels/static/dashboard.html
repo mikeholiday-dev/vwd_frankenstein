@@ -28,13 +28,17 @@
   <section class="card">
     <h2>New task</h2>
     <form id="newTask" class="task-form">
-      <textarea id="taskInput" placeholder="e.g. Is the supplier with IČO 27082440 a reliable VAT payer, and what's their registered address?" rows="2" required></textarea>
+      <textarea id="taskInput" placeholder="e.g. Here's an invoice PDF. Check the supplier, verify the bank account, and tell me the total in EUR." rows="2" required></textarea>
       <div class="task-form-row">
         <label class="muted small">Models
           <select id="taskModels">
             <option value="cheap" selected>cheap (rehearsal)</option>
             <option value="full">full</option>
           </select>
+        </label>
+        <label class="file-pick muted small">
+          <input type="file" id="taskFiles" multiple hidden>
+          <span id="taskFilesLabel">Attach files</span>
         </label>
         <span class="spacer"></span>
         <span id="taskStatus" class="muted small"></span>

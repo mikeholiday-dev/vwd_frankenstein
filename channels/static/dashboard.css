@@ -110,3 +110,6 @@ tr.quarantined { opacity:.6; }
 .task-form-row label { display:flex; gap:6px; align-items:center; }
 .task-form-row select { background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:5px 8px; color:var(--fg); font-size:12px; }
 .task-form-row button { padding:8px 18px; }
+.file-pick { cursor:pointer; border:1px dashed var(--line); border-radius:6px; padding:5px 10px; }
+.file-pick:hover { border-color:var(--muted); }
+.file-pick.has-files { border-style:solid; color:var(--fg); }

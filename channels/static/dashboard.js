@@ -298,6 +298,15 @@ function banner(cls, text) {
 
 // ---- new task -----------------------------------------------------------------------------
 
+$("taskFiles").addEventListener("change", () => {
+  const files = $("taskFiles").files;
+  const label = $("taskFilesLabel");
+  const pick = $("taskFiles").closest(".file-pick");
+  if (!files.length) { label.textContent = "Attach files"; pick.classList.remove("has-files"); return; }
+  label.textContent = files.length === 1 ? files[0].name : `${files.length} files`;
+  pick.classList.add("has-files");
+});
+
 $("newTask").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const input = $("taskInput");
@@ -306,9 +315,15 @@ $("newTask").addEventListener("submit", async (ev) => {
   const button = ev.target.querySelector("button[type=submit]");
   button.disabled = true;
   $("taskStatus").textContent = "Starting…";
+  const form = new FormData();
+  form.append("task", task);
+  form.append("models", $("taskModels").value);
+  for (const f of $("taskFiles").files) form.append("files", f);
   try {
-    await j("/api/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, models: $("taskModels").value }) });
+    await j("/api/tasks", { method: "POST", body: form });
     input.value = "";
+    $("taskFiles").value = "";
+    $("taskFiles").dispatchEvent(new Event("change"));
     $("taskStatus").textContent = "Started — see it below as it runs.";
     refreshSummarySoon();
   } catch (e) {
