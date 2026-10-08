@@ -387,6 +387,21 @@ def test_cli_attach_refuses_a_missing_file(tmp_path, monkeypatch, capsys):
     assert "not a file" in capsys.readouterr().err
 
 
+def test_cli_install_and_call_finish_their_runs(tmp_path, monkeypatch):
+    from harness import cli
+    from harness.ops.events import EventLog
+
+    monkeypatch.setattr(config, "FAKES", {"sandbox", "registry"})
+    monkeypatch.setattr(config, "APPROVER", "auto")
+    for name in ("LOG_PATH", "REGISTRY_DIR", "WORK_DIR"):
+        monkeypatch.setattr(config, name, tmp_path / name.lower())
+    assert cli.main(["install", str(BUNDLES / "echo_ok")]) == 0
+    assert cli.main(["call", "echo", '{"text": "ahoj"}']) == 0
+    assert cli.main(["install", str(BUNDLES / "echo_broken")]) == 1
+    finished = [e.data["status"] for e in EventLog(config.LOG_PATH).read_from(0)[0] if e.type == EventType.RUN_FINISHED]
+    assert finished == ["ok", "ok", "failed"]
+
+
 def test_write_file_works_through_a_symlinked_workdir(ctx, tmp_path):
     link = tmp_path / "linked-work"
     link.symlink_to(ctx.workdir)  # like /tmp -> /private/tmp on macOS

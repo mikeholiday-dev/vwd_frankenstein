@@ -119,7 +119,7 @@ function renderRuns() {
   $("runs").innerHTML = runs.slice(0, 15).map((r) => {
     const tone = STATUS_TONE[r.status] || "";
     return `<div class="run-item">
-      <div class="head">${chip(STATUS_LABEL[r.status] || r.status, tone)}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(no task)")}</span></div>
+      <div class="head">${chip(STATUS_LABEL[r.status] || r.status, tone)}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span></div>
       <div class="muted small">session ${esc(r.session)} · $${Number(r.usd || 0).toFixed(3)}${r.built.length ? ` · built ${r.built.map(esc).join(", ")}` : ""}${r.reused.length ? ` · reused ${r.reused.map(esc).join(", ")}` : ""}</div>
       ${r.answer ? `<div class="answer">${esc(r.answer)}</div>` : ""}
     </div>`;
@@ -169,6 +169,7 @@ function renderRegistry() {
 async function registryAction(what, url, opts) {
   try {
     await j(url, opts);
+    banner("ok", `${what} done.`);
   } catch (e) {
     banner("bad", `${what} failed: ${e.message}`);
   }

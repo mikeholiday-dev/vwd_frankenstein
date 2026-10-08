@@ -43,12 +43,20 @@ def main(argv: list[str] | None = None) -> int:
         for e in ctx.registry.list(include_quarantined=True):
             print(f"{e.manifest.ref:32} {e.status:12} {', '.join(e.manifest.permissions.network) or '-'}")
         return 0
-    if a.cmd == "install":
-        print(json.dumps(to_jsonable(ctx.gate.submit(a.bundle)), indent=2, ensure_ascii=False))
-        return 0
-    if a.cmd == "call":
-        print(json.dumps(to_jsonable(ctx.host.call(a.name, json.loads(a.args))), indent=2, ensure_ascii=False))
-        return 0
+    if a.cmd in ("install", "call"):  # a run of its own in the log, so it has to finish like one
+        status = "failed"
+        try:
+            if a.cmd == "install":
+                result = ctx.gate.submit(a.bundle)
+                ok = result.installed
+            else:
+                result = ctx.host.call(a.name, json.loads(a.args))
+                ok = result.ok
+            print(json.dumps(to_jsonable(result), indent=2, ensure_ascii=False))
+            status = "ok" if ok else "failed"
+        finally:
+            ctx.events.emit(EventType.RUN_FINISHED, status=status)
+        return 0 if status == "ok" else 1
 
     from harness.agent.loop import MODELS, run_session
 
