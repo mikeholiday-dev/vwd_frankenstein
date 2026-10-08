@@ -3,6 +3,7 @@ shared event log and registry the console does, so it's tested the same way."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -88,15 +89,34 @@ def test_decision_and_kill_go_through_the_log(dashboard, events):
     assert kill.type == EventType.KILL and kill.data["by"] == "operator"
 
 
-def test_rollback_and_quarantine_are_logged(dashboard, events):
+def _install_v1_and_v2(registry, tmp_path) -> Manifest:
+    v2 = tmp_path / "echo_v2"
+    shutil.copytree(BUNDLE, v2)
+    (v2 / "manifest.yaml").write_text((v2 / "manifest.yaml").read_text().replace("version: 1", "version: 2", 1))
+    registry.install(BUNDLE, Manifest.load(BUNDLE))
+    registry.install(v2, Manifest.load(v2))
+    return Manifest.load(v2)
+
+
+def test_rollback_and_quarantine_are_logged(dashboard, events, tmp_path):
     w, registry, _ = dashboard
-    manifest = Manifest.load(BUNDLE)
-    registry.install(BUNDLE, manifest)
-    assert w.rollback(manifest.name, w.Version(version=manifest.version))["manifest"]["name"] == manifest.name
+    manifest = _install_v1_and_v2(registry, tmp_path)
+    assert w.rollback(manifest.name, w.Version(version=1))["manifest"]["version"] == 1
+    assert w.registry()[0]["manifest"]["version"] == 1
+    assert w.rollback(manifest.name, w.Version(version=2))["manifest"]["version"] == 2  # and forward again
     w.quarantine(manifest.name)
     types = [e.type for e in events.read_from(0)[0]]
-    assert types == [EventType.ROLLBACK, EventType.QUARANTINE]
+    assert types == [EventType.ROLLBACK, EventType.ROLLBACK, EventType.QUARANTINE]
     assert w.registry()[0]["status"] == "quarantined"
+
+
+def test_rollback_to_the_active_version_is_refused_and_logs_nothing(dashboard, events, tmp_path):
+    w, registry, _ = dashboard
+    manifest = _install_v1_and_v2(registry, tmp_path)
+    with pytest.raises(HTTPException) as err:
+        w.rollback(manifest.name, w.Version(version=2))
+    assert err.value.status_code == 409
+    assert events.read_from(0)[0] == []
 
 
 def test_unknown_capability_is_a_404_and_logs_nothing(dashboard, events):
