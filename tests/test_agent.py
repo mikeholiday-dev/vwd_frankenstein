@@ -14,7 +14,7 @@ from dataclasses import replace
 import pytest
 
 from conftest import BUNDLES
-from harness import fakes
+from harness import config, fakes
 from harness.agent import loop, model, tools
 from harness.contracts import EventType
 from harness.kernel.gate import Gate
@@ -232,6 +232,62 @@ def test_study_logs_and_caps(ctx, monkeypatch):
     assert len(text) == tools.STUDY_MAX_CHARS
     event = events_of(ctx, EventType.STUDY)[0].data
     assert event["query"] == "how does it work" and event["url"] == "https://docs.example/page" and event["ok"]
+
+
+@pytest.fixture
+def no_keys(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "ENV_FILE", tmp_path / "no.env")
+    monkeypatch.delenv("APIFY_TOKEN", raising=False)
+
+
+class _Reply:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, n=-1):
+        return self.body
+
+
+def test_study_searches_through_apify_when_a_token_is_set(ctx, no_keys, monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "tok-123")
+    pages = [{"organicResults": [
+        {"title": "API  docs", "url": "https://docs.example/a", "description": "page text the agent must not get from search"},
+        {"title": "same again", "url": "https://docs.example/a"},
+        {"title": "", "url": "https://docs.example/untitled"},
+    ]}]  # fmt: skip
+    sent = []
+    monkeypatch.setattr(tools.urllib.request, "urlopen", lambda req, timeout: sent.append(req) or _Reply(json.dumps(pages).encode()))
+
+    assert tools.study(ctx, "how does it work") == "API docs\n  https://docs.example/a"
+    assert sent[0].get_header("Authorization") == "Bearer tok-123"
+    assert json.loads(sent[0].data)["queries"] == "how does it work"
+    event = events_of(ctx, EventType.STUDY)[0].data
+    assert event["backend"] == "apify" and event["ok"] and "tok-123" not in json.dumps(event)
+
+
+def test_study_without_a_token_searches_duckduckgo(ctx, no_keys, monkeypatch):
+    monkeypatch.setattr(tools, "_fetch_text", lambda url: "results")
+    assert tools.study(ctx, "q") == "results"
+    assert events_of(ctx, EventType.STUDY)[0].data["backend"] == "duckduckgo"
+
+
+@pytest.mark.parametrize("offered", [[], ["APIFY_TOKEN"]])
+def test_builder_is_told_secret_names_only_when_the_operator_offers_them(ctx, script, no_keys, monkeypatch, offered):
+    roles, seen = script
+    roles["planner"] = lambda call: call("report_gap", **GAP) and call("submit_answer", text="x", call_ids=[])
+    monkeypatch.setenv("APIFY_TOKEN", "tok-123")
+    monkeypatch.setattr(config, "SECRETS", offered)
+    loop.run_session("repeat", ctx)
+
+    brief = next(prompt for role, _, prompt, _ in seen if role == "builder")
+    assert ("Credentials the operator provisioned for this run: APIFY_TOKEN." in brief) == bool(offered)
+    assert "tok-123" not in brief
 
 
 @pytest.mark.parametrize("url", ["http://127.0.0.1:8000/", "http://localhost/x", "file:///etc/passwd", "ftp://example.org/x"])

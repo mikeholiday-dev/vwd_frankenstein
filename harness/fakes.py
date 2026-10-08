@@ -36,10 +36,11 @@ class LocalSandbox:
     """Runs code in a host subprocess with a scrubbed env: no API key, no network
     isolation, no filesystem isolation, so code can still read your Claude Code
     login under ~/.claude. Fine for team-written fixtures; for agent-written
-    code switch to the Docker sandbox as soon as it exists.
+    code switch to the Docker sandbox as soon as it exists. No gateway either:
+    `secrets` are ignored, so a keyed request goes out without its key.
     """
 
-    def run(self, workdir, argv, *, phase, network=(), deps=(), stdin=None, timeout_s=None, registry_ro=False):
+    def run(self, workdir, argv, *, phase, network=(), deps=(), stdin=None, timeout_s=None, registry_ro=False, secrets=()):
         assert config.MODE != "demo", "LocalSandbox is dev-only"
         Phase(phase)
         env = {"PATH": os.environ["PATH"], "HOME": str(workdir), "UV_CACHE_DIR": str(config.ROOT / ".cache" / "uv")}

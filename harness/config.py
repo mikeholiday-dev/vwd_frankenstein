@@ -6,6 +6,10 @@ FRANK_FAKE      comma list of components to replace with fakes: sandbox,registry
 FRANK_APPROVER  cli (default) | ui | auto
 FRANK_MODELS    full (default) | cheap. Cheap runs the planner and tester on Haiku and every build on Sonnet,
                 for rehearsing the plumbing. Demo refuses it.
+FRANK_SECRETS   comma list of keyed-API secrets Frankenstein may use this run (e.g. APIFY_TOKEN). Default: none.
+
+Key values (APIFY_TOKEN, ...) come from the environment or `.env` at the repo root (gitignored, see
+.env.example). They stay on the host: never in the repo, the event log or a sandbox.
 """
 
 from __future__ import annotations
@@ -37,3 +41,25 @@ FAKES: set[str] = (
 
 if MODE == "demo" and (FAKES or APPROVER == "auto" or MODELS != "full"):
     raise SystemExit(f"FRANK_MODE=demo forbids fakes ({sorted(FAKES)}), the auto approver and FRANK_MODELS={MODELS}")
+
+ENV_FILE = ROOT / ".env"
+
+
+def secret(name: str) -> str:
+    """The value of `name` from the environment, else from .env, else "". Not exported to os.environ."""
+    if value := os.environ.get(name, "").strip():
+        return value
+    try:
+        lines = ENV_FILE.read_text().splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        key, sep, value = line.strip().removeprefix("export ").partition("=")
+        if sep and key.strip() == name:
+            return value.strip().strip("'\"")
+    return ""
+
+
+# Offered to the builder by name only when the operator opts in, so a key on the machine
+# doesn't change how the main tasks get built. The kernel's vault decides where a key may go.
+SECRETS: list[str] = [s.strip() for s in os.environ.get("FRANK_SECRETS", "").split(",") if s.strip()]

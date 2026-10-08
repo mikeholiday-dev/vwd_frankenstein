@@ -9,6 +9,7 @@ the agent builds itself on top of these primitives.
 from __future__ import annotations
 
 import ipaddress
+import json
 import socket
 import urllib.parse
 import urllib.request
@@ -16,6 +17,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from harness import config
 from harness.contracts import CODE_FILE, TESTS_DIR, EventType, Phase, to_jsonable
 from harness.wiring import Context
 
@@ -83,6 +85,10 @@ STUDY_MAX_CHARS = 20_000
 STUDY_MAX_BYTES = 2_000_000
 STUDY_TIMEOUT_S = 15
 SEARCH_URL = "https://html.duckduckgo.com/html/?q={q}"
+# With APIFY_TOKEN set (env or .env), searches go through Apify's Google Search actor: the
+# token stays on the host, and the agent gets the same title + URL list either way.
+APIFY_SEARCH_URL = "https://api.apify.com/v2/acts/apify~google-search-scraper/run-sync-get-dataset-items?timeout=60"
+APIFY_TIMEOUT_S = 90
 _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/xhtml", "application/javascript", "application/yaml")
 
 
@@ -92,17 +98,39 @@ def study(ctx: Context, query: str, url: str | None = None) -> str:
     Runs on the host (it's team code, not generated code) but must not become a
     data channel: the provenance check flags answers without capability calls.
     """
-    target = url or SEARCH_URL.format(q=urllib.parse.quote_plus(query))
+    backend = "page" if url else "apify" if config.secret("APIFY_TOKEN") else "duckduckgo"
     try:
-        text = _fetch_text(target)
-        if not url:
-            text = _search_results(text) or text
+        if backend == "apify":
+            text = _apify_search(query, config.secret("APIFY_TOKEN"))
+        else:
+            text = _fetch_text(url or SEARCH_URL.format(q=urllib.parse.quote_plus(query)))
+            if not url:
+                text = _search_results(text) or text
         ok = True
     except (OSError, ValueError) as e:
         text, ok = f"study failed: {type(e).__name__}: {e}", False
     text = text[:STUDY_MAX_CHARS]
-    ctx.events.emit(EventType.STUDY, query=query, url=url or "", ok=ok, chars=len(text))
+    ctx.events.emit(EventType.STUDY, query=query, url=url or "", ok=ok, chars=len(text), backend=backend)
     return text
+
+
+def _apify_search(query: str, token: str) -> str:
+    """Title + URL lines, like _search_results. No snippets: they would carry page text, not just where to look."""
+    body = json.dumps({"queries": query, "maxPagesPerQuery": 1}).encode()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    req = urllib.request.Request(APIFY_SEARCH_URL, data=body, method="POST", headers=headers)
+    with urllib.request.urlopen(req, timeout=APIFY_TIMEOUT_S) as r:
+        pages = json.loads(r.read(STUDY_MAX_BYTES))
+    seen, rows = set(), []
+    for page in pages:
+        for hit in page.get("organicResults") or []:
+            target, label = hit.get("url", ""), " ".join(str(hit.get("title", "")).split())
+            if target.startswith("http") and label and target not in seen:
+                seen.add(target)
+                rows.append(f"{label}\n  {target}")
+    if not rows:
+        raise ValueError("search returned no results")
+    return "\n".join(rows[:15])
 
 
 def _fetch_text(url: str) -> str:

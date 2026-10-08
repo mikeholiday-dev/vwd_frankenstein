@@ -220,6 +220,7 @@ class Sandbox(Protocol):
         stdin: str | None = None,
         timeout_s: int | None = None,
         registry_ro: bool = False,
+        secrets: list[str] = (),  # names; the egress proxy adds their values to requests to their own hosts (gateway mode)
     ) -> SandboxResult: ...
 
 

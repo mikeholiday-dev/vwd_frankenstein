@@ -12,6 +12,9 @@ sandbox.Dockerfile (built on first use, tagged with the file's hash).
   docker network whose one way out is the proxy, with a per-container token allowing
   BUILD (and deps installs) → package index only, TEST/CALL → the manifest's domains only.
   Refused hosts come back in `egress_denied` and as `[egress]` lines on stderr
+- secrets: TEST/CALL tokens are granted the manifest's secret names, so the proxy adds their
+  keys to requests to their own hosts (gateway mode, vault.py). The values never enter a
+  container; a secret not offered in this run fails the run before it starts
 - limits: --cpus, --memory, --pids-limit, no capabilities, and `timeout_s`
   (default limits.MAX_SANDBOX_SECONDS); on timeout the container is killed
 - `deps`: installed with uv into a named volume per deps hash, so calls stay fast
@@ -23,15 +26,16 @@ from __future__ import annotations
 
 import hashlib
 import os
-import secrets
 import shutil
 import subprocess
 import time
 import uuid
 from pathlib import Path
+from secrets import token_hex
 
 from harness import config
 from harness.contracts import REGISTRY_ENV, Phase, SandboxResult
+from harness.kernel import vault
 from harness.kernel.limits import MAX_SANDBOX_SECONDS
 from harness.kernel.proxy import PACKAGE_INDEX, EgressProxy
 
@@ -64,12 +68,17 @@ class DockerSandbox:
         self.image = f"frank-sandbox:{hashlib.sha256(DOCKERFILE.read_bytes()).hexdigest()[:12]}"
         self.user = f"{os.getuid()}:{os.getgid()}"
         self._ensure_image()
-        self.proxy = EgressProxy(docker, self._cli_env, self.image, self.user, state_dir or config.ROOT / ".cache" / "egress")
+        keys = vault.for_proxy()
+        self.offered = set(keys)
+        self.proxy = EgressProxy(docker, self._cli_env, self.image, self.user, state_dir or config.ROOT / ".cache" / "egress", keys)
         self.proxy.ensure()
 
-    def run(self, workdir, argv, *, phase, network=(), deps=(), stdin=None, timeout_s=None, registry_ro=False) -> SandboxResult:
+    def run(self, workdir, argv, *, phase, network=(), deps=(), stdin=None, timeout_s=None, registry_ro=False, secrets=()) -> SandboxResult:
         phase = Phase(phase)
         run_id = uuid.uuid4().hex[:8]
+        secrets = [] if phase == Phase.BUILD else list(secrets)
+        if missing := sorted(set(secrets) - self.offered):
+            return SandboxResult(2, "", f"[secrets] not offered in this run: {missing}\n", 0.0, run_id=run_id)
         t0 = time.monotonic()
         flags = ["-v", f"{Path(workdir).resolve()}:/work:{'ro' if phase == Phase.CALL else 'rw'}"]
         if deps:
@@ -81,7 +90,7 @@ class DockerSandbox:
         if registry_ro:
             flags += ["-v", f"{self.registry_dir.resolve()}:/registry:ro", "-e", f"{REGISTRY_ENV}=/registry"]
         domains = PACKAGE_INDEX if phase == Phase.BUILD else list(network)
-        return self._container(run_id, phase, flags, list(argv), stdin, timeout_s or MAX_SANDBOX_SECONDS, domains)
+        return self._container(run_id, phase, flags, list(argv), stdin, timeout_s or MAX_SANDBOX_SECONDS, domains, secrets)
 
     def _deps(self, deps: list[str], run_id: str) -> tuple[str, SandboxResult | None]:
         """Install `deps` once into a volume named after their hash. Returns (volume, None) or ("", failure)."""
@@ -105,16 +114,17 @@ class DockerSandbox:
         return volume, None
 
     def _container(
-        self, run_id: str, phase: Phase, flags: list[str], argv: list[str], stdin: str | None, timeout_s: int, domains: list[str]
+        self, run_id: str, phase: Phase, flags: list[str], argv: list[str], stdin: str | None, timeout_s: int, domains: list[str],
+        secrets: list[str] = (),
     ) -> SandboxResult:
         name = f"frank-{phase}-{run_id}"
-        token = secrets.token_hex(16)
+        token = token_hex(16)
         cmd = [
             self.docker, "run", "--rm", *(["-i"] if stdin is not None else []), "--name", name, "--label", f"frank.phase={phase}",
             "--user", self.user, "-e", "HOME=/tmp", "-w", "/work", *CONFINEMENT, *self.proxy.env(token), *flags, self.image, *argv,
         ]  # fmt: skip
         io = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
-        self.proxy.allow(token, domains)
+        self.proxy.allow(token, domains, secrets)
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, env=self._cli_env, **io)
