@@ -3,6 +3,7 @@ shared event log and registry the console does, so it's tested the same way."""
 
 from __future__ import annotations
 
+import io
 import shutil
 from pathlib import Path
 
@@ -173,13 +174,13 @@ async def test_new_task_starts_runner_run_task_and_returns_its_session(dashboard
     w, _, _ = dashboard
     captured = {}
 
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, attach=(), secrets=None):
         captured.update(task=task, session=session, models=models, secrets=secrets)
         return
         yield  # pragma: no cover (makes this an async generator function)
 
     monkeypatch.setattr(w.runner, "run_task", fake_run_task)
-    result = await w.new_task(w.NewTask(task="look something up", models="full"))
+    result = await w.new_task(task="look something up", models="full", files=[])
 
     assert result["session"].startswith("web-")
     [t] = list(w._background_tasks)
@@ -193,13 +194,13 @@ async def test_new_task_passes_the_stores_offered_secrets(dashboard, monkeypatch
     store.set("apify", "apify-tok")
     captured = {}
 
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, attach=(), secrets=None):
         captured["secrets"] = secrets
         return
         yield  # pragma: no cover
 
     monkeypatch.setattr(w.runner, "run_task", fake_run_task)
-    await w.new_task(w.NewTask(task="x"))
+    await w.new_task(task="x", models="cheap", files=[])
     [t] = list(w._background_tasks)
     await t
     assert captured["secrets"] == {"APIFY_TOKEN": "apify-tok"}
@@ -209,7 +210,7 @@ async def test_new_task_passes_the_stores_offered_secrets(dashboard, monkeypatch
 async def test_new_task_rejects_an_empty_task(dashboard):
     w, _, _ = dashboard
     with pytest.raises(HTTPException) as err:
-        await w.new_task(w.NewTask(task="   "))
+        await w.new_task(task="   ", models="cheap", files=[])
     assert err.value.status_code == 400
 
 
@@ -217,7 +218,7 @@ async def test_new_task_rejects_an_empty_task(dashboard):
 async def test_new_task_rejects_an_unknown_model_tier(dashboard):
     w, _, _ = dashboard
     with pytest.raises(HTTPException) as err:
-        await w.new_task(w.NewTask(task="x", models="ultra"))
+        await w.new_task(task="x", models="ultra", files=[])
     assert err.value.status_code == 400
 
 
@@ -226,16 +227,92 @@ async def test_new_task_defaults_to_the_cheap_tier(dashboard, monkeypatch):
     w, _, _ = dashboard
     captured = {}
 
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, attach=(), secrets=None):
         captured["models"] = models
         return
         yield  # pragma: no cover
 
     monkeypatch.setattr(w.runner, "run_task", fake_run_task)
-    await w.new_task(w.NewTask(task="x"))
+    await w.new_task(task="x", models="cheap", files=[])
     [t] = list(w._background_tasks)
     await t
     assert captured["models"] == "cheap"
+
+
+# ---- new task: file uploads ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_task_with_no_files_attaches_nothing(dashboard, monkeypatch):
+    w, _, _ = dashboard
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, attach=(), secrets=None):
+        captured["attach"] = list(attach)
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(w.runner, "run_task", fake_run_task)
+    await w.new_task(task="x", models="cheap", files=[])
+    [t] = list(w._background_tasks)
+    await t
+    assert captured["attach"] == []
+
+
+@pytest.mark.asyncio
+async def test_new_task_saves_an_upload_and_attaches_its_path(dashboard, monkeypatch, tmp_path):
+    from fastapi import UploadFile
+
+    w, _, _ = dashboard
+    monkeypatch.setattr(w.config, "WORK_DIR", tmp_path / "work")
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, attach=(), secrets=None):
+        captured["attach"] = list(attach)
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(w.runner, "run_task", fake_run_task)
+    upload = UploadFile(file=io.BytesIO(b"%PDF-1.4 fake invoice"), filename="invoice.pdf")
+    result = await w.new_task(task="check this invoice", models="cheap", files=[upload])
+    [t] = list(w._background_tasks)
+    await t
+
+    [path] = captured["attach"]
+    assert path.name == "invoice.pdf"
+    assert path.read_bytes() == b"%PDF-1.4 fake invoice"
+    assert path.parent == tmp_path / "work" / "uploads" / result["session"]
+
+
+@pytest.mark.asyncio
+async def test_new_task_strips_directory_components_from_a_filename(dashboard, monkeypatch, tmp_path):
+    from fastapi import UploadFile
+
+    w, _, _ = dashboard
+    monkeypatch.setattr(w.config, "WORK_DIR", tmp_path / "work")
+
+    async def fake_run_task(task, *, session, models, attach=(), secrets=None):
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(w.runner, "run_task", fake_run_task)
+    upload = UploadFile(file=io.BytesIO(b"x"), filename="../../etc/passwd")
+    attach = await w._save_uploads("web-test", [upload])
+    [path] = attach
+    assert path.name == "passwd"
+    assert path.parent == tmp_path / "work" / "uploads" / "web-test"
+
+
+@pytest.mark.asyncio
+async def test_new_task_rejects_an_upload_over_the_size_cap(dashboard, monkeypatch):
+    from fastapi import UploadFile
+
+    w, _, _ = dashboard
+    monkeypatch.setattr(w, "MAX_UPLOAD_BYTES", 10)
+    upload = UploadFile(file=io.BytesIO(b"x" * 11), filename="big.bin")
+    with pytest.raises(HTTPException) as err:
+        await w._save_uploads("web-test", [upload])
+    assert err.value.status_code == 400
 
 
 def test_summary_mixes_runs_from_every_channel(dashboard, events):
