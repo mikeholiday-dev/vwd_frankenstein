@@ -1,6 +1,6 @@
 # Working in parallel
 
-Three people, three workstreams, one repo. The split follows plan §9: **A** kernel, **B** agent, **C** operator console + delivery.
+Three people, three workstreams, one repo. The split follows plan §9: **A** kernel, **B** agent, **C** operator console + delivery. **D**, channels (Telegram bot, voice, credentials), is a later addition on top of the same contracts — see its own section below.
 
 ## Rules
 
@@ -19,6 +19,7 @@ Three people, three workstreams, one repo. The split follows plan §9: **A** ker
 | `harness/agent/`, `harness/cli.py` | **B** | kernel tools done except `study`; `run_session` stub; empty prompts |
 | `harness/ops/events.py`, `approvals.py` | **C** | done: JSONL log + approval/kill over the log |
 | `ui/`, `scripts/`, `testdata/`, `README.md`, video | **C** | bare console that works; fake run script |
+| `channels/` | **D** | Telegram bot (text + voice) in front of `frank run`, ElevenLabs voice, a credentials page |
 | `tests/test_<area>.py` | owner of the area | |
 | `registry/` | **nobody**: only the agent, through the gate | |
 
@@ -81,6 +82,21 @@ Owns `ui/`, `harness/ops/`, `scripts/`, `testdata/`, `README.md`. Doesn't need t
 3. README: how to run, plus the real/simulated/missing table. Rehearse the video storyboard (plan §11).
 
 Dev loop: `uv run uvicorn ui.app:app --reload` in one terminal, `uv run python scripts/fake_run.py` in another, then approve in the browser.
+
+## Stream D: channels (Telegram bot, voice, credentials)
+
+Owns `channels/`. A chat/voice front end to the same harness the CLI and console already use, not a new agent path: each incoming task spawns `frank run --session telegram-<chat>` as its own subprocess, exactly as if an operator had typed it. Nothing here touches `harness/agent/`, so rule 2 (no hints to Frankenstein) is unaffected — this code is operator-facing, like the README's API check.
+
+1. `channels/telegram/bot.py`: a `python-telegram-bot` app. A text message, or a transcribed voice message, becomes one `frank run` subprocess per request.
+2. `channels/telegram/runner.py`: spawns the subprocess with `FRANK_APPROVER=ui` and tails the shared event log for that run's `run_id` (matched from its `run_started`'s `session`), so installs can be approved from Telegram or the console, whichever responds first (both just call `harness.ops.approvals.decide`), and the chat gets live progress (gap → build → test → install) instead of silence during a multi-minute build.
+3. Cost: `FRANK_MODELS=cheap` by default per chat (stream B's existing switch), `/quality full` to opt a chat into the real tier. The existing `MAX_USD_PER_RUN`/`MAX_RUN_MINUTES` caps are the hard backstop; nothing new was added there.
+4. `channels/voice.py`: ElevenLabs Scribe for incoming voice (STT), the voice API for the reply (TTS). The reply's text is sent immediately; the voice note follows once synthesized, so the user isn't blocked on audio generation.
+5. `channels/apify.py`: thin, best-effort REST wrapper. Its role beyond "another key the credentials page can hold" is still open.
+6. `channels/web.py`: a small FastAPI page, separate from the console, where an operator enters the Telegram/ElevenLabs/Apify keys. Unchecked "remember" = held in memory for that process only; checked = persisted to `~/.frankenstein/credentials.json` (outside the repo, `0600`), never into `registry/`, `logs/`, or git (Claude access rule: never write a credential into the repo, the event log or a sandbox mount). Each key is only asked for lazily, the first time its service is actually needed.
+
+Dev loop: `uv run python -m channels.telegram.bot` — one process, needs a Telegram bot token (see its own README note on getting one from @BotFather) and serves the credentials page (`channels/web.py`) on `:8001` alongside the bot, sharing one in-memory `CredentialStore` (a second process wouldn't see what the first was given unless "remember" was ticked).
+
+No real Telegram/ElevenLabs/Apify credentials were available while building this: the harness integration (subprocess + event-log tailing + approval relay) is tested against a real `frank run`-shaped event log; the Telegram/ElevenLabs calls themselves are unit-tested against mocks, not a live account.
 
 ## From stream A: what the real kernel means for B and C
 
