@@ -13,12 +13,13 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from harness import config
 from harness.contracts import EventType, to_jsonable
+from harness.kernel.limits import LIMITS
 from harness.ops.approvals import decide
 from harness.ops.events import EventLog
 from harness.wiring import make_registry
@@ -39,7 +40,13 @@ class Version(BaseModel):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/config")
+def settings():
+    """What the console shows before any run: the caps and which parts are fakes."""
+    return {"limits": LIMITS, "mode": config.MODE, "fakes": sorted(config.FAKES), "approver": config.APPROVER, "auth": config.AUTH}
 
 
 @app.get("/api/events")
@@ -77,13 +84,19 @@ def registry():
 
 @app.post("/api/registry/{name}/rollback")
 def rollback(name: str, v: Version):
-    entry = make_registry().rollback(name, v.version)
+    try:
+        entry = make_registry().rollback(name, v.version)
+    except KeyError:
+        raise HTTPException(404, f"{name}@v{v.version} was never installed") from None
     events.emit(EventType.ROLLBACK, name=name, version=v.version, by="operator")
     return to_jsonable(entry)
 
 
 @app.post("/api/registry/{name}/quarantine")
 def quarantine(name: str):
-    make_registry().quarantine(name)  # TODO(A): also revoke the capability's proxy domains
+    try:
+        make_registry().quarantine(name)  # TODO(A): also revoke the capability's proxy domains
+    except KeyError:
+        raise HTTPException(404, f"{name} is not installed") from None
     events.emit(EventType.QUARANTINE, name=name, by="operator")
     return {"ok": True}

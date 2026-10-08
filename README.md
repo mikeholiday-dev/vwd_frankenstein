@@ -124,6 +124,8 @@ uv run frank call echo '{"text":"ahoj"}'
 # operator console
 uv run uvicorn ui.app:app --reload                # http://localhost:8000
 uv run python scripts/fake_run.py                 # scripted run, approve it in the UI
+uv run python scripts/fake_run.py --scenario upgrade   # v2 upgrade with a permissions diff
+uv run python scripts/fake_run.py --scenario capped    # repairs fail until the cap stops the run
 
 # agent session (stream B; not implemented yet)
 FRANK_APPROVER=ui uv run frank run --session A "Is the supplier with IČO 27082440 ..."
