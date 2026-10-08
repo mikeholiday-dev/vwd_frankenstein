@@ -49,15 +49,21 @@ NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 
 def run_tests(
-    sandbox: Sandbox, bundle: Path, manifest: Manifest, events: EventLog, suite: str = "own", uses: list[RegistryEntry] = ()
+    sandbox: Sandbox, bundle: Path, manifest: Manifest, events: EventLog, suite: str = "own", uses: list[RegistryEntry] = (),
+    test_deps: list[str] | None = None,
 ) -> TestReport:
-    """Run `bundle`'s tests in the sandbox on a throwaway copy, with its resolved `uses` alongside, and log the full output."""
+    """Run `bundle`'s tests in the sandbox on a throwaway copy, with its resolved `uses` alongside, and log the full output.
+
+    `test_deps`: packages only the tests need (default: the manifest's `test_dependencies`).
+    """
+    test_deps = manifest.test_dependencies if test_deps is None else test_deps
+    deps = list(dict.fromkeys([*dependencies(manifest, list(uses)), *test_deps]))
     with tempfile.TemporaryDirectory(prefix=f"test-{manifest.name}-") as tmp:
         work = Path(tmp) / "bundle"
         shutil.copytree(bundle, work, symlinks=True)
         vendor(list(uses), work)
         r = sandbox.run(
-            work, TEST_ARGV, phase=Phase.TEST, network=manifest.permissions.network, deps=dependencies(manifest, list(uses)),
+            work, TEST_ARGV, phase=Phase.TEST, network=manifest.permissions.network, deps=deps,
             registry_ro=manifest.permissions.filesystem == "registry_ro",
         )
     report = TestReport(
@@ -70,6 +76,12 @@ def run_tests(
     )
     events.emit(EventType.TEST_RUN, **vars(report), suite=suite, egress_denied=r.egress_denied)
     return report
+
+
+def record_test(registry: Registry, manifest: Manifest, passed: bool, suite: str) -> None:
+    """For capabilities that read the registry. `record_test` is on GitRegistry, not on the Registry Protocol."""
+    if record := getattr(registry, "record_test", None):
+        record(manifest.name, manifest.version, passed, suite)
 
 
 class Gate:
@@ -117,6 +129,7 @@ class Gate:
                 return self._result(manifest.ref, False, f"rejected by {decision.by}: {decision.reason}", report)
 
             self.registry.install(candidate, manifest)
+            record_test(self.registry, manifest, report.passed, "install")
             return self._result(manifest.ref, True, f"approved by {decision.by}", report)
 
     def _precheck(self, bundle: Path, manifest: Manifest) -> str:
@@ -147,7 +160,10 @@ class Gate:
             work = Path(tmp) / "bundle"
             shutil.copytree(candidate, work, symlinks=True, ignore=lambda d, names: [TESTS_DIR] if Path(d) == candidate else [])
             shutil.copytree(previous.path / TESTS_DIR, work / TESTS_DIR)
-            return run_tests(self.sandbox, work, manifest, self.events, suite=f"regression: {previous.manifest.ref} tests", uses=uses)
+            test_deps = list(dict.fromkeys([*manifest.test_dependencies, *previous.manifest.test_dependencies]))
+            return run_tests(
+                self.sandbox, work, manifest, self.events, suite=f"regression: {previous.manifest.ref} tests", uses=uses, test_deps=test_deps
+            )
 
     def _versions(self, name: str) -> set[int]:
         versions, v = set(), 1

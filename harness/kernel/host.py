@@ -27,7 +27,7 @@ from typing import Any
 
 from harness.contracts import CALL_SHIM_FILE, CallResult, EventType, Phase, Registry, Sandbox, TestReport
 from harness.kernel.compose import UsesError, dependencies, resolve, vendor
-from harness.kernel.gate import run_tests
+from harness.kernel.gate import record_test, run_tests
 from harness.ops.events import EventLog
 
 INPUTS_DIR = "_frank_inputs"
@@ -100,8 +100,10 @@ class Host:
         except UsesError as e:
             report = TestReport(entry.manifest.ref, False, -1, f"[uses] {e}", 0.0, "")
             self.events.emit(EventType.TEST_RUN, **vars(report), suite="retest", egress_denied=[])
-            return report
-        return run_tests(self.sandbox, entry.path, entry.manifest, self.events, suite="retest", uses=uses)
+        else:
+            report = run_tests(self.sandbox, entry.path, entry.manifest, self.events, suite="retest", uses=uses)
+        record_test(self.registry, entry.manifest, report.passed, "retest")
+        return report
 
     def _log(self, result: CallResult, args: dict[str, Any], egress_denied: list[str], uses: list[str] = ()) -> CallResult:
         self.events.emit(EventType.CALL, **vars(result), args=args, egress_denied=egress_denied, uses=list(uses))

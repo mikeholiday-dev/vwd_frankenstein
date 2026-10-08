@@ -68,6 +68,7 @@ class Manifest:
     interface: dict[str, dict[str, str]]  # {"input": {...}, "output": {...}}
     permissions: Permissions = field(default_factory=Permissions)
     dependencies: list[str] = field(default_factory=list)
+    test_dependencies: list[str] = field(default_factory=list)  # installed for test runs only, never for calls
     tests: dict[str, str] = field(default_factory=dict)
     origin: dict[str, str] = field(default_factory=dict)
     uses: list[str] = field(default_factory=list)

@@ -106,25 +106,29 @@ async def _run(ctx: Context, role: str, model: str, system: str, prompt: str, to
     after_stop = 0
     # Once a cap, the kill switch or Stop is raised, every tool call is refused, so the model can only end its turn.
     # The stream is drained to its result instead of cut: cutting it mid-turn leaves the SDK's subprocess half closed.
-    async for msg in query(prompt=one_message(), options=options):
-        if isinstance(msg, AssistantMessage):
-            text = [b.text for b in msg.content if isinstance(b, TextBlock)] or text
-            if raised:
-                after_stop += 1
-                if after_stop > STOP_GRACE_TURNS:
-                    break
-                continue
-            try:
-                ctx.budget.turn()
-            except (CapExceeded, Killed) as e:
-                raised.append(e)
-        elif isinstance(msg, ResultMessage):
-            final = msg.result or ""
-            if msg.total_cost_usd and all(isinstance(e, Stop) for e in raised):  # an accepted answer still costs
+    stream = query(prompt=one_message(), options=options)
+    try:
+        async for msg in stream:
+            if isinstance(msg, AssistantMessage):
+                text = [b.text for b in msg.content if isinstance(b, TextBlock)] or text
+                if raised:
+                    after_stop += 1
+                    if after_stop > STOP_GRACE_TURNS:
+                        break
+                    continue
                 try:
-                    ctx.budget.charge_usd(msg.total_cost_usd)
+                    ctx.budget.turn()
                 except (CapExceeded, Killed) as e:
                     raised.append(e)
+            elif isinstance(msg, ResultMessage):
+                final = msg.result or ""
+                if msg.total_cost_usd and all(isinstance(e, Stop) for e in raised):  # an accepted answer still costs
+                    try:
+                        ctx.budget.charge_usd(msg.total_cost_usd)
+                    except (CapExceeded, Killed) as e:
+                        raised.append(e)
+    finally:
+        await stream.aclose()  # here, in this task: left to asyncio.run's shutdown, closing it fails with a traceback
     if denied:
         ctx.events.emit(EventType.ERROR, message=f"{role} tried tools outside the harness; all were refused: {sorted(set(denied))}")
     for e in raised:

@@ -37,7 +37,7 @@ def write_file(ctx: Context, path: str, content: str) -> str:
     target = _in_workspace(ctx, path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
-    return str(target.relative_to(ctx.workdir))
+    return str(target.relative_to(ctx.workdir.resolve()))  # the workdir path may run through a symlink (/tmp on macOS)
 
 
 def sandbox_exec(ctx: Context, bundle: str, argv: list[str], deps: list[str] | None = None) -> dict[str, Any]:
