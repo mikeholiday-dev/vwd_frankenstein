@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -80,6 +81,19 @@ def kill():
 @app.get("/api/registry")
 def registry():
     return [to_jsonable(e) for e in make_registry().list(include_quarantined=True)]
+
+
+@app.get("/api/registry/log")
+def registry_log(limit: int = 50):
+    """The registry's git history: every install authored by the agent, every rollback/quarantine by the operator."""
+    if not (config.REGISTRY_DIR / ".git").exists():
+        return []  # the fake registry has no history
+    fmt = "%h%x1f%an%x1f%aI%x1f%s%x1f%D"
+    out = subprocess.run(["git", "-C", str(config.REGISTRY_DIR), "log", f"-n{max(1, min(limit, 500))}", f"--format={fmt}"],
+                         capture_output=True, text=True)
+    if out.returncode:
+        return []  # no commits yet
+    return [dict(zip(("sha", "author", "date", "subject", "refs"), line.split("\x1f"))) for line in out.stdout.splitlines()]
 
 
 @app.post("/api/registry/{name}/rollback")

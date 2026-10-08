@@ -66,6 +66,23 @@ def test_rollback_and_quarantine_are_logged(console, events):
     assert app.registry()[0]["status"] == "quarantined"
 
 
+def test_registry_log_shows_who_wrote_what(console, tmp_path, monkeypatch):
+    from harness.kernel.registry import GitRegistry
+
+    app, _ = console
+    monkeypatch.setattr(config, "REGISTRY_DIR", tmp_path / "git-registry")
+    assert app.registry_log() == []
+    registry = GitRegistry(config.REGISTRY_DIR)
+    [created] = app.registry_log()
+    manifest = Manifest.load(BUNDLE)
+    registry.install(BUNDLE, manifest)
+    registry.quarantine(manifest.name)
+    quarantine, install, first = app.registry_log()
+    assert first["sha"] == created["sha"]
+    assert install["author"] == "frankenstein-agent" and manifest.ref in install["refs"]
+    assert quarantine["author"] == "frankenstein-operator"
+
+
 def test_unknown_capability_is_a_404_and_logs_nothing(console, events):
     app, registry = console
     manifest = Manifest.load(BUNDLE)
