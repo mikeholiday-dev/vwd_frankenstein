@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from harness.contracts import EventType, to_jsonable
-from harness.kernel.limits import MAX_AGENT_TURNS, CapExceeded
+from harness.kernel.limits import MAX_PLANNER_TURNS, MAX_TURNS_PER_GAP, CapExceeded
 from harness.ops.approvals import Killed
 from harness.wiring import Context
 
@@ -98,7 +98,7 @@ async def _run(ctx: Context, role: str, model: str, system: str, prompt: str, to
         system_prompt=system,
         model=model,
         cwd=str(ctx.workdir),
-        max_turns=MAX_AGENT_TURNS,
+        max_turns=MAX_PLANNER_TURNS if role == "planner" else MAX_TURNS_PER_GAP,  # a backstop: ctx.budget enforces both
         env={"MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_MS)},
     )
     text: list[str] = []
