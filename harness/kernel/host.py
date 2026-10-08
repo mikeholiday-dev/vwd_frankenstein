@@ -3,6 +3,9 @@
 Each call copies the active version to a fresh dir, drops the call shim next to
 it, and runs it in the sandbox with only the manifest's domains allowed.
 
+`retest` re-runs an installed version's stored tests: the primitive behind
+capability_doctor (stream B wraps it as a kernel tool).
+
 TODO(A): prompt_skill calls; `uses` (a capability calling another one).
 """
 
@@ -15,7 +18,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from harness.contracts import CALL_SHIM_FILE, CallResult, EventType, Phase, Registry, Sandbox
+from harness.contracts import CALL_SHIM_FILE, CallResult, EventType, Phase, Registry, Sandbox, TestReport
+from harness.kernel.gate import run_tests
 from harness.ops.events import EventLog
 
 CALL_SHIM = """\
@@ -41,7 +45,7 @@ class Host:
         m = entry.manifest
         call_id = f"call-{uuid.uuid4().hex[:8]}"
         if entry.status != "active":
-            return self._log(CallResult(call_id, m.ref, False, error=f"{m.ref} is {entry.status}"), args)
+            return self._log(CallResult(call_id, m.ref, False, error=f"{m.ref} is {entry.status}"), args, [])
         with tempfile.TemporaryDirectory(prefix=f"call-{name}-") as tmp:
             work = Path(tmp) / "cap"
             shutil.copytree(entry.path, work)
@@ -55,8 +59,13 @@ class Host:
             result = CallResult(call_id, m.ref, out["ok"], out.get("output"), out.get("error", ""), round(r.duration_s, 2))
         except (IndexError, json.JSONDecodeError, KeyError):
             result = CallResult(call_id, m.ref, False, error=f"no result (exit {r.exit_code}): {r.stderr[-2000:]}", duration_s=round(r.duration_s, 2))
-        return self._log(result, args)
+        return self._log(result, args, r.egress_denied)
 
-    def _log(self, result: CallResult, args: dict[str, Any]) -> CallResult:
-        self.events.emit(EventType.CALL, **vars(result), args=args)
+    def retest(self, name: str, version: int | None = None) -> TestReport:
+        """Re-run the stored tests of an installed version (default: active), quarantined or not. Logged as test_run."""
+        entry = self.registry.get(name, version)
+        return run_tests(self.sandbox, entry.path, entry.manifest, self.events, suite="retest")
+
+    def _log(self, result: CallResult, args: dict[str, Any], egress_denied: list[str]) -> CallResult:
+        self.events.emit(EventType.CALL, **vars(result), args=args, egress_denied=egress_denied)
         return result
