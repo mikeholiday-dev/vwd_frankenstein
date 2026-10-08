@@ -68,3 +68,10 @@ def test_spend_after_a_stop_is_recorded_without_a_second_cap_hit(events):
     log = events.read_from(0)[0]
     assert budget.usd == 9.0 and log[-1].type == EventType.BUDGET and log[-1].data["usd"] == 9.0
     assert not any(e.type == EventType.CAP_HIT for e in log)
+
+
+def test_blocks_of_one_response_count_as_one_turn(events):
+    budget = Budget(events)
+    assert [budget.turn("msg-1"), budget.turn("msg-1"), budget.turn("msg-1"), budget.turn("msg-2"), budget.turn()] == [True, False, False, True, True]
+    assert (budget.turns, budget.planner_turns) == (3, 3)
+    assert sum(e.type == EventType.BUDGET for e in events.read_from(0)[0]) == 3

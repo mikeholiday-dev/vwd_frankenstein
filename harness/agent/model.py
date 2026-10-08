@@ -104,6 +104,7 @@ async def _run(ctx: Context, role: str, model: str, system: str, prompt: str, to
     text: list[str] = []
     final = ""
     after_stop = 0
+    last_id: str | None = None
     # Once a cap, the kill switch or Stop is raised, every tool call is refused, so the model can only end its turn.
     # The stream is drained to its result instead of cut: cutting it mid-turn leaves the SDK's subprocess half closed.
     stream = query(prompt=one_message(), options=options)
@@ -111,13 +112,15 @@ async def _run(ctx: Context, role: str, model: str, system: str, prompt: str, to
         async for msg in stream:
             if isinstance(msg, AssistantMessage):
                 text = [b.text for b in msg.content if isinstance(b, TextBlock)] or text
+                new_turn = msg.message_id is None or msg.message_id != last_id  # one response arrives as a message per block
+                last_id = msg.message_id
                 if raised:
-                    after_stop += 1
+                    after_stop += new_turn
                     if after_stop > STOP_GRACE_TURNS:
                         break
                     continue
                 try:
-                    ctx.budget.turn()
+                    ctx.budget.turn(msg.message_id)
                 except (CapExceeded, Killed) as e:
                     raised.append(e)
             elif isinstance(msg, ResultMessage):

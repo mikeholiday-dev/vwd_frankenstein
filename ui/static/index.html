@@ -483,7 +483,8 @@ function line(e) {
 
 function renderTimeline() {
   const r = current();
-  const evs = (r ? r.events : []).concat(S.operator).sort((a, b) => b.id - a.id);
+  const all = (r ? r.events : []).concat(S.operator).sort((a, b) => b.id - a.id);
+  const evs = all.filter((e, i) => !(e.type === "budget" && all[i - 1]?.type === "budget"));  // a run of budget ticks shows its latest
   $("evcount").textContent = evs.length;
   $("timeline").innerHTML = evs.slice(0, 400).map((e) =>
     `<div class="ev"><span class="t">${clock(e.ts)}</span><span class="ty">${esc(e.type)}</span><span>${line(e)}</span></div>`).join("")

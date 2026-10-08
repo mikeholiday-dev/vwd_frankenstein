@@ -66,6 +66,7 @@ class Budget:
         self.building_gap: str | None = None  # turns count against this gap while it's being built
         self.gaps = 0
         self.repairs: dict[str, int] = {}
+        self._last_message_id: str | None = None
         self._kill_offset = events.end()
 
     @property
@@ -84,13 +85,19 @@ class Budget:
         else:
             self.events.emit(EventType.BUDGET, **self.snapshot())
 
-    def turn(self) -> None:
+    def turn(self, message_id: str | None = None) -> bool:
+        """Count one model turn. The SDK yields a message per content block, all sharing the response's `message_id`:
+        repeats of the last id are the same turn and aren't counted again. Returns whether this was a new turn."""
+        if message_id is not None and message_id == self._last_message_id:
+            return False
+        self._last_message_id = message_id
         self.turns += 1
         if self.building_gap:
             self.gap_turns[self.building_gap] = self.gap_turns.get(self.building_gap, 0) + 1
         else:
             self.planner_turns += 1
         self._changed()
+        return True
 
     @contextmanager
     def building(self, gap_id: str) -> Iterator[None]:
