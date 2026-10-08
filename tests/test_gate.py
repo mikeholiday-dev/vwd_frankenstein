@@ -1,7 +1,9 @@
 """Install gate hardening (plan §5): what it refuses before testing, regression tests on v2, retest."""
 
+import json
 import os
 import shutil
+import subprocess
 
 import pytest
 import yaml
@@ -11,6 +13,7 @@ from harness.contracts import CODE_FILE, EventType
 from harness.fakes import AutoApprover
 from harness.kernel.gate import Gate
 from harness.kernel.host import Host
+from harness.kernel.registry import TESTS_FILE
 
 
 @pytest.fixture
@@ -107,3 +110,26 @@ def test_retest_reruns_the_stored_tests(gate, sandbox, registry, events, tmp_pat
 
     assert report.passed and report.ref == "echo@v1"
     assert logged_test_runs(events)[-1]["suite"] == "retest"
+
+
+def test_install_and_retest_leave_the_last_test_run_in_the_registry(gate, sandbox, registry, events):
+    if not hasattr(registry, "record_test"):
+        pytest.skip("DirRegistry keeps no test runs")
+    assert gate.submit(BUNDLES / "echo_ok").installed
+    runs = lambda: json.loads((registry.root / TESTS_FILE).read_text())["echo"]["1"]  # noqa: E731
+    assert (runs()["passed"], runs()["suite"]) == (True, "install")
+
+    Host(sandbox, registry, events).retest("echo")
+
+    assert (runs()["passed"], runs()["suite"]) == (True, "retest")
+    tracked = subprocess.run(["git", "ls-files"], cwd=registry.root, capture_output=True, text=True).stdout.split()
+    assert TESTS_FILE not in tracked  # a test run isn't a registry change: the git log stays installs and operator actions
+
+
+def test_test_dependencies_reach_test_runs_but_not_calls(gate, sandbox, registry, events, tmp_path):
+    code = "import importlib.util\n\n\ndef run(text):\n    return {'echo': text, 'six': importlib.util.find_spec('six') is not None}\n"
+    test = "import six  # noqa: F401\nfrom capability import run\n\n\ndef test_echo():\n    assert run('ahoj')['echo'] == 'ahoj'\n"
+    b = bundle(tmp_path, "b", code=code, test=test, test_dependencies=["six==1.16.0"])
+
+    assert gate.submit(b).installed
+    assert Host(sandbox, registry, events).call("echo", {"text": "ahoj"}).output == {"echo": "ahoj", "six": False}

@@ -12,6 +12,8 @@ Layout: `registry/` is its own git repo.
 - get(name, version) materialises that version's tag into `.git/frank-cache/<name>@v<N>/`
   (tags never move, so the cache never goes stale); treat that folder as read-only
 - writes take a file lock: the UI process rolls back and quarantines while the agent installs
+- `_tests.json` (untracked) holds the harness's last test run per version, so a `registry_ro`
+  capability can tell when a tool was last tested and whether it passed
 """
 
 from __future__ import annotations
@@ -31,7 +33,8 @@ from pathlib import Path
 from harness.contracts import Manifest, RegistryEntry
 
 STATE_FILE = "_state.json"
-GITIGNORE = "__pycache__/\n*.pyc\n.pytest_cache/\n"
+TESTS_FILE = "_tests.json"
+GITIGNORE = f"__pycache__/\n*.pyc\n.pytest_cache/\n{TESTS_FILE}\n"
 AGENT = ("frankenstein-agent", "agent@frankenstein.invalid")
 OPERATOR = ("frankenstein-operator", "operator@frankenstein.invalid")
 HARNESS = ("frankenstein-harness", "harness@frankenstein.invalid")
@@ -96,6 +99,14 @@ class GitRegistry:
             state[name]["quarantined"] = True
             self._write_state(state)
             self._commit(OPERATOR, f"quarantine {name}", STATE_FILE)
+
+    def record_test(self, name: str, version: int, passed: bool, suite: str) -> None:
+        """Keep the harness's last test run of name@vN. Not committed: a test run doesn't change the registry."""
+        with self._lock():
+            p = self.root / TESTS_FILE
+            runs = json.loads(p.read_text()) if p.exists() else {}
+            runs.setdefault(name, {})[str(version)] = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "passed": passed, "suite": suite}
+            p.write_text(json.dumps(runs, indent=2) + "\n")
 
     def _entry(self, name: str, version: int, s: dict) -> RegistryEntry:
         ref = f"{name}@v{version}"
