@@ -63,29 +63,14 @@ def make_context(chat_data=None, store=None, args=None):
     return SimpleNamespace(chat_data=chat_data if chat_data is not None else {}, bot_data={"store": store or CredentialStore()}, args=args or [])
 
 
-# ---- pure helpers ---------------------------------------------------------------------------
+# ---- pure helpers: see tests/test_chat.py for quality_for/is_busy/approval_callback_data/parse_approval_callback -------
 
 
-def test_quality_defaults_to_cheap():
-    assert bot.quality_for({}) == "cheap"
-    assert bot.quality_for({"quality": "full"}) == "full"
-
-
-def test_approval_callback_round_trips():
-    data = bot.approval_callback_data("req-9", True)
-    assert bot.parse_approval_callback(data) == ("req-9", True)
-    data = bot.approval_callback_data("req-9", False)
-    assert bot.parse_approval_callback(data) == ("req-9", False)
-
-
-def test_truncate_leaves_short_text_alone():
+def test_truncate_uses_telegrams_own_default_limit():
+    text = "x" * 4000
+    out = bot.truncate(text)
+    assert len(out) == bot.MAX_MESSAGE_CHARS
     assert bot.truncate("short") == "short"
-
-
-def test_truncate_cuts_long_text():
-    long = "x" * 5000
-    out = bot.truncate(long, limit=100)
-    assert len(out) == 100 and out.endswith("…")
 
 
 # ---- /quality ---------------------------------------------------------------------------------

@@ -11,7 +11,7 @@ const chip = (text, cls = "") => `<span class="chip ${cls}">${esc(text)}</span>`
 
 const STATUS_TONE = { ok: "ok", failed: "bad", killed: "bad", capped: "warn", unfinished: "info", running: "info" };
 const STATUS_LABEL = { ok: "ok", failed: "failed", killed: "killed", capped: "capped", unfinished: "running" };
-const CRED_LABELS = { telegram: "Telegram bot token", elevenlabs: "ElevenLabs API key", apify: "Apify API token" };
+const CRED_LABELS = { telegram: "Telegram bot token", discord: "Discord bot token", elevenlabs: "ElevenLabs API key", apify: "Apify API token" };
 
 const S = { config: null, summary: null, registry: [], creds: {}, pending: new Map(), budget: null, caps: [], lastId: -1 };
 

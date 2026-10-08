@@ -10,6 +10,7 @@ dependencies = [
     "pyyaml",
     "python-telegram-bot>=22.8",
     "elevenlabs>=2.71.0",
+    "discord-py>=2.4",
 ]
 
 [project.scripts]
