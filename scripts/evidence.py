@@ -33,6 +33,7 @@ class RunSummary:
     status: str = "unfinished"  # the log has no run_finished: still running, or the process died
     fake: bool = False
     attached: list[str] = field(default_factory=list)
+    models: dict[str, str] = field(default_factory=dict)  # role -> model id, empty for a log recorded before FRANK_MODELS
     registry_at_start: list[str] = field(default_factory=list)
     gaps: list[str] = field(default_factory=list)
     builds: Counter = field(default_factory=Counter)  # role -> count
@@ -87,6 +88,7 @@ def summarize(events: list[Event]) -> list[RunSummary]:
             case EventType.RUN_STARTED:
                 r.task, r.started = d["task"], e.ts
                 r.attached, r.registry_at_start = d.get("attached", []), d.get("registry", [])
+                r.models = d.get("models", {})
             case EventType.GAP:
                 r.gaps.append(d["gap"] + (f" (upgrade of {d['upgrade']})" if d.get("upgrade") else ""))
             case EventType.STUDY:
@@ -175,6 +177,8 @@ def _run(r: RunSummary) -> list[str]:
     out.append(f"**Task:** {r.task or '(none: direct install or call)'}")
     if r.attached:
         out.append(f"**Attached files:** {', '.join(r.attached)}")
+    if r.models:
+        out.append("**Models:** " + ", ".join(f"{role} {model}" for role, model in sorted(r.models.items())))
     out.append(f"**Registry at start:** {_refs(r.registry_at_start) if r.registry_at_start else 'empty'}")
     if r.gaps:
         out += ["", "**Gaps reported:**", *[f"- {g}" for g in r.gaps]]
