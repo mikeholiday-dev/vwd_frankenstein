@@ -122,9 +122,10 @@ async def _run(ctx: Context, role: str, model: str, system: str, prompt: str, to
                     raised.append(e)
             elif isinstance(msg, ResultMessage):
                 final = msg.result or ""
-                if msg.total_cost_usd and all(isinstance(e, Stop) for e in raised):  # an accepted answer still costs
+                if msg.total_cost_usd:  # a capped, killed or accepted turn still cost what it cost
+                    stopped = any(not isinstance(e, Stop) for e in raised)
                     try:
-                        ctx.budget.charge_usd(msg.total_cost_usd)
+                        ctx.budget.charge_usd(msg.total_cost_usd, check=not stopped)
                     except (CapExceeded, Killed) as e:
                         raised.append(e)
     finally:

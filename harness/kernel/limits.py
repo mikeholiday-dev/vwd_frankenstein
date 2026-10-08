@@ -76,9 +76,13 @@ class Budget:
         price_in, price_out = PRICES_PER_MTOK[model]
         self.charge_usd(((input_tokens + cache_tokens) * price_in + output_tokens * price_out) / 1_000_000)
 
-    def charge_usd(self, usd: float) -> None:
+    def charge_usd(self, usd: float, check: bool = True) -> None:
+        """`check=False` records spend after the run was already stopped, without a second cap_hit."""
         self.usd += usd
-        self._changed()
+        if check:
+            self._changed()
+        else:
+            self.events.emit(EventType.BUDGET, **self.snapshot())
 
     def turn(self) -> None:
         self.turns += 1
