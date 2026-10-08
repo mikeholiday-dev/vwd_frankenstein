@@ -1,13 +1,13 @@
 """The Telegram bot. Owner: D.
 
-One process: Telegram polling plus the embedded credentials page (channels/web.py)
+One process: Telegram polling plus the embedded dashboard (channels/web.py: console controls + credentials)
 on CREDENTIALS_PORT, sharing one CredentialStore. A text or voice message becomes
 one channels.telegram.runner.run_task() call; progress is relayed into the chat as
 it happens, approvals can be decided from an inline keyboard here or from the web
 console (both just write to the same event log), and the final answer is spoken
 back through ElevenLabs when a key is available.
 
-  uv run python -m channels.telegram.bot    # needs FRANK_TELEGRAM_KEY or the credentials page
+  uv run python -m channels.telegram.bot    # needs FRANK_TELEGRAM_KEY or a token entered on the dashboard
 """
 
 from __future__ import annotations
@@ -102,6 +102,18 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await handle_task(update, context, text)
 
 
+def offered_secrets(store: CredentialStore) -> dict[str, str]:
+    """Pass the operator's own keys through to Frankenstein's vault (gateway mode), so a
+    bot-triggered run can build and call a keyed-API capability the same way a terminal
+    operator with a .env file could — separate from the bot's own direct ElevenLabs calls."""
+    out = {}
+    if tok := store.get("apify"):
+        out["APIFY_TOKEN"] = tok
+    if key := store.get("elevenlabs"):
+        out["ELEVENLABS_API_KEY"] = key
+    return out
+
+
 async def handle_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task: str) -> None:
     chat_data = context.chat_data
     if is_busy(chat_data):
@@ -112,8 +124,9 @@ async def handle_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task: 
     status_msg = await update.message.reply_text("Starting…")
     lines: list[str] = []
     answer_text: str | None = None
+    secrets = offered_secrets(context.bot_data["store"])
     try:
-        async for upd in runner.run_task(task, session=session, models=quality_for(chat_data)):
+        async for upd in runner.run_task(task, session=session, models=quality_for(chat_data), secrets=secrets):
             if upd.kind == "approval_requested":
                 await _ask_approval(update, upd)
                 continue
@@ -175,7 +188,7 @@ def build_app(token: str, store: CredentialStore) -> Application:
 
 
 async def run_forever() -> None:
-    """The credentials page comes up immediately, even with no Telegram token yet — that's the
+    """The dashboard comes up immediately, even with no Telegram token yet — that's the
     only way to supply one, since there's no chat to ask in before the bot can connect at all."""
     store = CredentialStore()
     web.store = store

@@ -117,7 +117,7 @@ def summarize(events: list[Event]) -> list[RunSummary]:
                 r.status = d["status"]
                 r.budget = d.get("budget") or r.budget
     for e in events:
-        if e.type == EventType.KILL and e.session == "ui":
+        if e.type == EventType.KILL:  # the console writes it under session "ui", a bot channel under its own
             for r in runs.values():
                 if r.started <= e.ts <= (r.last if r.status != "unfinished" else e.ts) and r.status in ("killed", "unfinished"):
                     r.killed_by = e.data["by"]

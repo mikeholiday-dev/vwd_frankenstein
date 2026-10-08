@@ -39,8 +39,15 @@ class Progress:
 
 
 async def run_task(task: str, *, session: str, attach: list[Path] = (), models: str = "cheap",
-                    log_path: Path | None = None) -> AsyncIterator[Progress]:
-    """Run one task and yield Progress updates as the harness's event log reports them."""
+                    secrets: dict[str, str] | None = None, log_path: Path | None = None) -> AsyncIterator[Progress]:
+    """Run one task and yield Progress updates as the harness's event log reports them.
+
+    `secrets`: e.g. {"APIFY_TOKEN": "...", "ELEVENLABS_API_KEY": "..."} from the operator's own
+    credentials (channels/credentials.py), passed through as env vars plus FRANK_SECRETS so this
+    run can use the kernel's vault (gateway mode) the same way a terminal operator with a .env
+    file would — this is a different use than the bot's own direct ElevenLabs calls (channels/voice.py):
+    this lets Frankenstein itself build and call a keyed-API capability, through the egress proxy.
+    """
     log_path = log_path or config.LOG_PATH
     events = EventLog(log_path, session=f"{session}-reader")
     offset = events.end()
@@ -49,7 +56,10 @@ async def run_task(task: str, *, session: str, attach: list[Path] = (), models: 
     for f in attach:
         argv += ["--attach", str(f)]
     argv.append(task)
-    env = {**os.environ, "FRANK_APPROVER": "ui", "FRANK_MODELS": models}
+    secrets = {k: v for k, v in (secrets or {}).items() if v}
+    env = {**os.environ, "FRANK_APPROVER": "ui", "FRANK_MODELS": models, **secrets}
+    if secrets:
+        env["FRANK_SECRETS"] = ",".join(secrets)
 
     proc = await asyncio.create_subprocess_exec(*argv, cwd=str(config.ROOT), env=env,
                                                  stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)

@@ -103,6 +103,45 @@ async def test_run_task_tails_only_its_own_session_and_run_id(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_run_task_passes_offered_secrets_to_the_subprocess_env(tmp_path, monkeypatch):
+    """Not through the bot's own ElevenLabs calls (channels/voice.py) — this is the operator's
+    key reaching Frankenstein's own vault (harness/kernel/vault.py), the same way FRANK_SECRETS
+    plus a .env file would for a terminal operator."""
+    log_path = tmp_path / "events.jsonl"
+    captured = {}
+
+    async def fake_subprocess_exec(*argv, **kwargs):
+        captured["env"] = kwargs["env"]
+        return await real_subprocess_exec(sys.executable, "-c", "import sys; sys.exit(0)", **kwargs)
+
+    monkeypatch.setattr("channels.telegram.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
+
+    async for _ in run_task("t", session="mine", log_path=log_path, secrets={"APIFY_TOKEN": "tok", "ELEVENLABS_API_KEY": "key"}):
+        pass
+
+    assert captured["env"]["APIFY_TOKEN"] == "tok"
+    assert captured["env"]["ELEVENLABS_API_KEY"] == "key"
+    assert set(captured["env"]["FRANK_SECRETS"].split(",")) == {"APIFY_TOKEN", "ELEVENLABS_API_KEY"}
+
+
+@pytest.mark.asyncio
+async def test_run_task_sets_no_frank_secrets_without_offered_secrets(tmp_path, monkeypatch):
+    log_path = tmp_path / "events.jsonl"
+    captured = {}
+
+    async def fake_subprocess_exec(*argv, **kwargs):
+        captured["env"] = kwargs["env"]
+        return await real_subprocess_exec(sys.executable, "-c", "import sys; sys.exit(0)", **kwargs)
+
+    monkeypatch.setattr("channels.telegram.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
+    async for _ in run_task("t", session="mine", log_path=log_path):
+        pass
+
+    assert "FRANK_SECRETS" not in captured["env"]
+    assert "APIFY_TOKEN" not in captured["env"]
+
+
+@pytest.mark.asyncio
 async def test_run_task_reports_a_subprocess_that_never_starts(tmp_path, monkeypatch):
     log_path = tmp_path / "events.jsonl"
 
