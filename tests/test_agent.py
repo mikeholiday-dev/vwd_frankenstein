@@ -6,6 +6,7 @@ for real over the fake sandbox and registry. Only the model's choices are script
 """
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -324,3 +325,11 @@ def test_cli_attach_refuses_a_missing_file(tmp_path, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         cli.main(["run", "--attach", str(tmp_path / "nope.pdf"), "task"])
     assert "not a file" in capsys.readouterr().err
+
+
+def test_write_file_works_through_a_symlinked_workdir(ctx, tmp_path):
+    link = tmp_path / "linked-work"
+    link.symlink_to(ctx.workdir)  # like /tmp -> /private/tmp on macOS
+
+    assert tools.write_file(replace(ctx, workdir=link), "gap-x/capability.py", "x = 1\n") == "gap-x/capability.py"
+    assert (ctx.workdir / "gap-x" / "capability.py").read_text() == "x = 1\n"
