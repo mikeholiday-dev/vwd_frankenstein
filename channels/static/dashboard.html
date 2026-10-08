@@ -24,6 +24,24 @@
 
 <main class="wrap">
 
+  <section class="card">
+    <h2>New task</h2>
+    <form id="newTask" class="task-form">
+      <textarea id="taskInput" placeholder="e.g. Is the supplier with IČO 27082440 a reliable VAT payer, and what's their registered address?" rows="2" required></textarea>
+      <div class="task-form-row">
+        <label class="muted small">Models
+          <select id="taskModels">
+            <option value="cheap" selected>cheap (rehearsal)</option>
+            <option value="full">full</option>
+          </select>
+        </label>
+        <span class="spacer"></span>
+        <span id="taskStatus" class="muted small"></span>
+        <button type="submit" class="ok">Run</button>
+      </div>
+    </form>
+  </section>
+
   <section class="tiles" id="tiles" aria-label="Overview"></section>
 
   <section class="cols">

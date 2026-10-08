@@ -2,7 +2,7 @@
 
 One process: Telegram polling plus the embedded dashboard (channels/web.py: console controls + credentials)
 on CREDENTIALS_PORT, sharing one CredentialStore. A text or voice message becomes
-one channels.telegram.runner.run_task() call; progress is relayed into the chat as
+one channels.runner.run_task() call; progress is relayed into the chat as
 it happens, approvals can be decided from an inline keyboard here or from the web
 console (both just write to the same event log), and the final answer is spoken
 back through ElevenLabs when a key is available.
@@ -20,9 +20,8 @@ import uvicorn
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from channels import voice, web
-from channels.credentials import CredentialStore
-from channels.telegram import runner
+from channels import runner, voice, web
+from channels.credentials import CredentialStore, offered_secrets
 from harness import config
 from harness.contracts import EventType
 from harness.ops.events import EventLog
@@ -100,18 +99,6 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(f"Heard: {text}")
     await handle_task(update, context, text)
-
-
-def offered_secrets(store: CredentialStore) -> dict[str, str]:
-    """Pass the operator's own keys through to Frankenstein's vault (gateway mode), so a
-    bot-triggered run can build and call a keyed-API capability the same way a terminal
-    operator with a .env file could — separate from the bot's own direct ElevenLabs calls."""
-    out = {}
-    if tok := store.get("apify"):
-        out["APIFY_TOKEN"] = tok
-    if key := store.get("elevenlabs"):
-        out["ELEVENLABS_API_KEY"] = key
-    return out
 
 
 async def handle_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task: str) -> None:

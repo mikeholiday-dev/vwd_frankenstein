@@ -69,3 +69,16 @@ class CredentialStore:
 def _check(service: str) -> None:
     if service not in SERVICES:
         raise ValueError(f"unknown service {service!r}, expected one of {SERVICES}")
+
+
+# Names the kernel's vault (harness/kernel/vault.py) binds to a host and header.
+VAULT_ENV_NAMES = {"apify": "APIFY_TOKEN", "elevenlabs": "ELEVENLABS_API_KEY"}
+
+
+def offered_secrets(store: CredentialStore) -> dict[str, str]:
+    """The operator's own keys, mapped to the env var names Frankenstein's vault (gateway
+    mode) expects, for passing through to channels.runner.run_task's `secrets=`. Lets a
+    channel-triggered run build and call a keyed-API capability the same way a terminal
+    operator with a .env file could — separate from a channel's own direct API calls
+    (e.g. channels/voice.py's ElevenLabs use for a Telegram reply)."""
+    return {env_name: value for service, env_name in VAULT_ENV_NAMES.items() if (value := store.get(service))}

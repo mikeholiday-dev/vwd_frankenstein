@@ -295,6 +295,29 @@ function banner(cls, text) {
   setTimeout(() => el.remove(), 15000);
 }
 
+// ---- new task -----------------------------------------------------------------------------
+
+$("newTask").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const input = $("taskInput");
+  const task = input.value.trim();
+  if (!task) return;
+  const button = ev.target.querySelector("button[type=submit]");
+  button.disabled = true;
+  $("taskStatus").textContent = "Starting…";
+  try {
+    await j("/api/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, models: $("taskModels").value }) });
+    input.value = "";
+    $("taskStatus").textContent = "Started — see it below as it runs.";
+    refreshSummarySoon();
+  } catch (e) {
+    $("taskStatus").textContent = "Could not start: " + e.message;
+  } finally {
+    button.disabled = false;
+    setTimeout(() => { $("taskStatus").textContent = ""; }, 6000);
+  }
+});
+
 // ---- wiring -------------------------------------------------------------------------------
 
 $("kill").addEventListener("click", async () => {

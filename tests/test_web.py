@@ -145,6 +145,79 @@ def test_summary_tracks_an_unfinished_run_as_active(dashboard, events):
     assert s["success_rate"] is None  # no finished runs yet to compute a rate from
 
 
+# ---- new task ------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_task_starts_runner_run_task_and_returns_its_session(dashboard, monkeypatch):
+    w, _, _ = dashboard
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None):
+        captured.update(task=task, session=session, models=models, secrets=secrets)
+        return
+        yield  # pragma: no cover (makes this an async generator function)
+
+    monkeypatch.setattr(w.runner, "run_task", fake_run_task)
+    result = await w.new_task(w.NewTask(task="look something up", models="full"))
+
+    assert result["session"].startswith("web-")
+    [t] = list(w._background_tasks)
+    await t  # let the background task actually run before asserting
+    assert captured == {"task": "look something up", "session": result["session"], "models": "full", "secrets": {}}
+
+
+@pytest.mark.asyncio
+async def test_new_task_passes_the_stores_offered_secrets(dashboard, monkeypatch):
+    w, _, store = dashboard
+    store.set("apify", "apify-tok")
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None):
+        captured["secrets"] = secrets
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(w.runner, "run_task", fake_run_task)
+    await w.new_task(w.NewTask(task="x"))
+    [t] = list(w._background_tasks)
+    await t
+    assert captured["secrets"] == {"APIFY_TOKEN": "apify-tok"}
+
+
+@pytest.mark.asyncio
+async def test_new_task_rejects_an_empty_task(dashboard):
+    w, _, _ = dashboard
+    with pytest.raises(HTTPException) as err:
+        await w.new_task(w.NewTask(task="   "))
+    assert err.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_new_task_rejects_an_unknown_model_tier(dashboard):
+    w, _, _ = dashboard
+    with pytest.raises(HTTPException) as err:
+        await w.new_task(w.NewTask(task="x", models="ultra"))
+    assert err.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_new_task_defaults_to_the_cheap_tier(dashboard, monkeypatch):
+    w, _, _ = dashboard
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None):
+        captured["models"] = models
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(w.runner, "run_task", fake_run_task)
+    await w.new_task(w.NewTask(task="x"))
+    [t] = list(w._background_tasks)
+    await t
+    assert captured["models"] == "cheap"
+
+
 def test_summary_mixes_runs_from_every_channel(dashboard, events):
     """A run started under any session (cli, telegram, ...) is counted — the dashboard isn't
     scoped to only what it itself started."""
