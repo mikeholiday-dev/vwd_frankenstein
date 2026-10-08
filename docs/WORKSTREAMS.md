@@ -14,7 +14,7 @@ Three people, three workstreams, one repo. The split follows plan §9: **A** ker
 | Path | Owner | State now |
 |---|---|---|
 | `harness/contracts.py`, `config.py`, `wiring.py`, `fakes.py` | shared (PR + 2 approvals) | done |
-| `harness/kernel/limits.py`, `gate.py`, `host.py` | **A** | done: hardened gate, v2 regression tests, `Host.retest`, `uses`. TODO: prompt_skill |
+| `harness/kernel/limits.py`, `gate.py`, `host.py` | **A** | done: hardened gate, v2 regression tests, `Host.retest`, `uses`, `Host.attach` (input files). prompt_skill cut (plan §9) |
 | `harness/kernel/sandbox.py`, `proxy.py`, `registry.py` | **A** | done: Docker sandbox behind the egress proxy, git registry. The default now |
 | `harness/agent/`, `harness/cli.py` | **B** | kernel tools done except `study`; `run_session` stub; empty prompts |
 | `harness/ops/events.py`, `approvals.py` | **C** | done: JSONL log + approval/kill over the log |
@@ -52,7 +52,8 @@ Owns `harness/kernel/`. Doesn't need the agent or the UI.
 4. ✅ Gate hardening: refusals before testing (see "From stream A" below), tests on a throwaway copy, v2 must pass the active version's tests too.
 5. ✅ `Host.retest(name, version=None)`, the "re-run stored tests" primitive. ⚠️ Quarantine doesn't cut a call already in flight (≤ 60 s): proxy tokens live one container, and the host refuses new calls of a quarantined capability.
 6. ✅ `uses`: a capability calls installed ones with `from frank import use` (`harness/kernel/compose.py`). Authority can't grow through it.
-7. Next: prompt_skill installs (eval cases + judge); rehearsal support.
+7. ✅ Input files: `Host.attach(path)` hands the operator's files (task 2's invoice PDF) to every call, read-only, at `_frank_inputs/<name>`.
+8. Cut: prompt_skill installs (first in the plan §9 cut order). Next: rehearsal support.
 
 Dev loop: `uv run frank install tests/fixtures/bundles/echo_ok` then `uv run frank call echo '{"text":"hi"}'`.
 
@@ -121,6 +122,7 @@ Refusals come back as `InstallResult(installed=False, reason=..., test_report=No
 3. Composition: the builder can reuse an installed capability by listing it in `uses` and calling `use(...)` (see "Composition" above), instead of copying its code. Teach the mechanism generically in the prompt (rule 2: no capability names). A `refused: ... doesn't declare` reason means: add those hosts to `permissions.network`.
 4. `capability_doctor` kernel tool: wrap `ctx.host.retest(name, version)`. It returns a `TestReport` and logs `test_run` with `suite="retest"`. It's on `kernel.host.Host`, not yet on the `CapabilityHost` Protocol: add it there in a small PR (optional method, A approves).
 5. Run with the defaults (Docker). Use `FRANK_FAKE=sandbox` only without Docker.
+6. Input files (task 2): add `frank run --attach FILE` (repeatable) and call `ctx.host.attach(path)`. It returns `["_frank_inputs/<name>"]`: tell the planner those paths exist (generic wording, e.g. "Attached files: ..."), and it passes them to capabilities as plain string args. Only calls see them, not test runs: the builder's tests must make their own sample file (the tester can generate a small PDF with a PyPI package). To try parsing the real file during BUILD, copy it into the workspace. `attach` isn't on the `CapabilityHost` Protocol yet (like `retest`).
 
 ### Stream C tasks
 
