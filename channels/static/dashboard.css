@@ -103,3 +103,10 @@ tr.quarantined { opacity:.6; }
 .cred-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; }
 .cred-form input[type=password] { flex:1; min-width:140px; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:6px 8px; color:var(--fg); font:12px var(--mono); }
 .cred-form label { display:flex; gap:5px; align-items:center; font-size:12px; color:var(--muted); white-space:nowrap; }
+
+/* ---- new task ---- */
+.task-form textarea { width:100%; background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--fg); font:14px/1.4 inherit; resize:vertical; }
+.task-form-row { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+.task-form-row label { display:flex; gap:6px; align-items:center; }
+.task-form-row select { background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:5px 8px; color:var(--fg); font-size:12px; }
+.task-form-row button { padding:8px 18px; }

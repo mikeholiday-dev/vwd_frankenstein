@@ -1,11 +1,12 @@
-"""Spawns one `frank run` per task and turns the shared event log into chat-sized updates. Owner: D.
+"""Spawns one `frank run` per task. Owner: D. Shared by every channel (the Telegram bot,
+the web dashboard's "New task" form) so there's exactly one place that knows how to start one.
 
 Each call is its own subprocess, exactly like an operator typing
 `frank run --session <s> "<task>"` at a terminal: nothing here imports harness.agent
 directly, so it can't drift from what a human running the CLI gets, and a crash in
-one chat's run can't take another chat's run down with it. Installs run with
-FRANK_APPROVER=ui, so a request can be approved from this bot or the web console,
-whichever answers first — both just call harness.ops.approvals.decide.
+one run can't take another one down with it. Installs run with FRANK_APPROVER=ui, so
+a request can be approved from the bot, the dashboard or the console, whichever
+answers first — all three just call harness.ops.approvals.decide.
 """
 
 from __future__ import annotations

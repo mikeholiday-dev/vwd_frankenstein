@@ -13,8 +13,8 @@ import pytest
 
 from channels import telegram as _telegram_pkg  # noqa: F401  (ensures the package imports cleanly)
 from channels.credentials import CredentialStore
+from channels.runner import Progress
 from channels.telegram import bot
-from channels.telegram.runner import Progress
 
 
 class FakeMessage:
@@ -64,18 +64,6 @@ def make_context(chat_data=None, store=None, args=None):
 
 
 # ---- pure helpers ---------------------------------------------------------------------------
-
-
-def test_offered_secrets_is_empty_with_no_keys():
-    assert bot.offered_secrets(CredentialStore()) == {}
-
-
-def test_offered_secrets_maps_store_keys_to_env_names():
-    store = CredentialStore()
-    store.set("apify", "apify-tok")
-    store.set("elevenlabs", "el-key")
-    store.set("telegram", "bot-tok")  # not a vault secret: never offered to the agent
-    assert bot.offered_secrets(store) == {"APIFY_TOKEN": "apify-tok", "ELEVENLABS_API_KEY": "el-key"}
 
 
 def test_quality_defaults_to_cheap():

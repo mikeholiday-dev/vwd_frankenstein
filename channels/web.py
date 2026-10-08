@@ -16,13 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from channels.credentials import SERVICES, CredentialStore
+from channels import runner
+from channels.credentials import SERVICES, CredentialStore, offered_secrets
 from harness import config
 from harness.contracts import EventType, to_jsonable
 from harness.kernel.limits import LIMITS
@@ -35,6 +37,12 @@ app = FastAPI(title="Frankenstein dashboard")
 store = CredentialStore()
 events = EventLog(config.LOG_PATH, session="web")
 STATIC = Path(__file__).parent / "static"
+_background_tasks: set[asyncio.Task] = set()  # keeps a reference so asyncio doesn't GC a running task
+
+
+class NewTask(BaseModel):
+    task: str
+    models: str = "cheap"
 
 
 class SetCredential(BaseModel):
@@ -121,6 +129,29 @@ def summary():
             for r in reversed(runs)
         ],
     }
+
+
+@app.post("/api/tasks")
+async def new_task(body: NewTask):
+    """Start a task the same way the Telegram bot or `frank run` at a terminal would — one
+    subprocess, through channels.runner.run_task. Its progress isn't streamed back here: the
+    dashboard's existing /api/events feed and /api/summary polling already pick it up from
+    the shared event log, the same way they show a run started from anywhere else."""
+    task = body.task.strip()
+    if not task:
+        raise HTTPException(400, "task is empty")
+    if body.models not in ("cheap", "full"):
+        raise HTTPException(400, "models must be 'cheap' or 'full'")
+    session = f"web-{uuid.uuid4().hex[:8]}"
+    t = asyncio.create_task(_drain(session, task, body.models))
+    _background_tasks.add(t)
+    t.add_done_callback(_background_tasks.discard)
+    return {"session": session}
+
+
+async def _drain(session: str, task: str, models: str) -> None:
+    async for _ in runner.run_task(task, session=session, models=models, secrets=offered_secrets(store)):
+        pass
 
 
 # ---- approvals, kill ------------------------------------------------------------------------

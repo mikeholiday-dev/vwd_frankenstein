@@ -16,7 +16,7 @@ import pytest
 
 real_subprocess_exec = asyncio.create_subprocess_exec
 
-from channels.telegram.runner import _format, decide_approval, run_task
+from channels.runner import _format, decide_approval, run_task
 from harness.contracts import Event, EventType
 from harness.ops.events import EventLog
 
@@ -93,7 +93,7 @@ async def test_run_task_tails_only_its_own_session_and_run_id(tmp_path, monkeypa
     async def fake_subprocess_exec(*argv, **kwargs):
         return await real_subprocess_exec(sys.executable, "-c", script, **kwargs)
 
-    monkeypatch.setattr("channels.telegram.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
+    monkeypatch.setattr("channels.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
 
     updates = [u async for u in run_task("t", session="mine", log_path=log_path)]
     kinds = [u.kind for u in updates]
@@ -114,7 +114,7 @@ async def test_run_task_passes_offered_secrets_to_the_subprocess_env(tmp_path, m
         captured["env"] = kwargs["env"]
         return await real_subprocess_exec(sys.executable, "-c", "import sys; sys.exit(0)", **kwargs)
 
-    monkeypatch.setattr("channels.telegram.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
+    monkeypatch.setattr("channels.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
 
     async for _ in run_task("t", session="mine", log_path=log_path, secrets={"APIFY_TOKEN": "tok", "ELEVENLABS_API_KEY": "key"}):
         pass
@@ -133,7 +133,7 @@ async def test_run_task_sets_no_frank_secrets_without_offered_secrets(tmp_path, 
         captured["env"] = kwargs["env"]
         return await real_subprocess_exec(sys.executable, "-c", "import sys; sys.exit(0)", **kwargs)
 
-    monkeypatch.setattr("channels.telegram.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
+    monkeypatch.setattr("channels.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
     async for _ in run_task("t", session="mine", log_path=log_path):
         pass
 
@@ -148,7 +148,7 @@ async def test_run_task_reports_a_subprocess_that_never_starts(tmp_path, monkeyp
     async def fake_subprocess_exec(*argv, **kwargs):
         return await real_subprocess_exec(sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(1)", **kwargs)
 
-    monkeypatch.setattr("channels.telegram.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
+    monkeypatch.setattr("channels.runner.asyncio.create_subprocess_exec", fake_subprocess_exec)
 
     updates = [u async for u in run_task("t", session="mine", log_path=log_path)]
     assert updates[-1].kind == "crashed"

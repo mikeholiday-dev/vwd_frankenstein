@@ -6,12 +6,23 @@ import stat
 
 import pytest
 
-from channels.credentials import CredentialStore
+from channels.credentials import CredentialStore, offered_secrets
 
 
 @pytest.fixture
 def store(tmp_path):
     return CredentialStore(tmp_path / "credentials.json")
+
+
+def test_offered_secrets_is_empty_with_no_keys(store):
+    assert offered_secrets(store) == {}
+
+
+def test_offered_secrets_maps_store_keys_to_vault_env_names(store):
+    store.set("apify", "apify-tok")
+    store.set("elevenlabs", "el-key")
+    store.set("telegram", "bot-tok")  # not a vault secret: never offered to the agent
+    assert offered_secrets(store) == {"APIFY_TOKEN": "apify-tok", "ELEVENLABS_API_KEY": "el-key"}
 
 
 def test_unset_service_is_none(store):
