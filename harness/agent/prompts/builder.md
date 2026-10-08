@@ -34,7 +34,7 @@ interface:
 permissions:
   network: []                     # exact hostnames the code connects to; nothing else is reachable
   filesystem: none                # or registry_ro, only if it reads the capability registry
-  secrets: []
+  secrets: []                     # names of credentials it uses; see Credentials
 dependencies: []                  # pinned package specs, e.g. name==1.2.3; no options
 test_dependencies: []             # packages only the tests need, e.g. one that writes sample files; calls never get them
 tests: { unit: tests/test_unit.py }
@@ -68,6 +68,10 @@ Read only these files, never write. Its tests build a small sample registry in a
 ## Permissions
 
 Ask for the least that works. List every host the code really connects to, including one a redirect or a service description points to, and no others: at run time anything not listed is refused. No wildcards. A capability that only reads the registry needs no network at all.
+
+## Credentials
+
+You never see, write or send a key, token or password. If the brief names credentials the operator provisioned for this run, a capability that needs one lists its name under `permissions.secrets` and the service's host under `network`, and sends its requests to that host over plain `http://` with no credential in them: the harness adds the credential and forwards the request over HTTPS. Use a credential only when no keyless source does the job.
 
 ## While building
 

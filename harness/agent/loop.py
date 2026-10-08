@@ -186,6 +186,8 @@ class Session:
         bundle = gap.id
         (ctx.workdir / bundle).mkdir(parents=True, exist_ok=True)
         spec = f"Gap:\n{json.dumps(vars(gap), ensure_ascii=False, indent=2)}\n\n{self._upgrade_brief(upgrade)}"
+        if offered := [s for s in config.SECRETS if config.secret(s)]:  # names only; the operator opted in with FRANK_SECRETS
+            spec += f"\nCredentials the operator provisioned for this run: {', '.join(offered)}."
         if self.inputs:
             spec += (
                 f"\nThe operator attached files to this session: {', '.join(f'{INPUTS_DIR}/{n}' for n in self.inputs)}. A capability call can open those paths, "
