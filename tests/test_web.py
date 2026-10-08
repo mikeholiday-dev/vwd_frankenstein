@@ -34,7 +34,7 @@ def dashboard(events, tmp_path, monkeypatch):
 def test_status_starts_unconfigured(dashboard):
     w, _, _ = dashboard
     status = w.credential_status()
-    assert status.keys() == {"telegram", "elevenlabs", "apify"}
+    assert status.keys() == {"telegram", "discord", "elevenlabs", "apify"}
     assert all(s == {"configured": False, "remembered": False} for s in status.values())
 
 

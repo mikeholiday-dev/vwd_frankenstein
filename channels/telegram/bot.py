@@ -21,7 +21,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from channels import runner, voice, web
-from channels.credentials import CredentialStore, offered_secrets
+from channels.chat import approval_callback_data, is_busy, parse_approval_callback, quality_for
+from channels.chat import truncate as _truncate
+from channels.credentials import CredentialStore, offered_secrets, wait_for_token
 from harness import config
 from harness.contracts import EventType
 from harness.ops.events import EventLog
@@ -29,28 +31,9 @@ from harness.ops.events import EventLog
 CREDENTIALS_PORT = int(os.environ.get("FRANK_CREDENTIALS_PORT", "8001"))
 MAX_MESSAGE_CHARS = 3500  # Telegram's limit is 4096; leave room for formatting
 
-# ---- pure helpers (unit-tested without touching Telegram or the harness) --------------------
-
-
-def quality_for(chat_data: dict) -> str:
-    return chat_data.get("quality", "cheap")
-
-
-def is_busy(chat_data: dict) -> bool:
-    return bool(chat_data.get("busy"))
-
-
-def approval_callback_data(request_id: str, approved: bool) -> str:
-    return f"approval:{int(approved)}:{request_id}"
-
-
-def parse_approval_callback(data: str) -> tuple[str, bool]:
-    _, approved, request_id = data.split(":", 2)
-    return request_id, bool(int(approved))
-
 
 def truncate(text: str, limit: int = MAX_MESSAGE_CHARS) -> str:
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    return _truncate(text, limit)
 
 
 # ---- handlers ---------------------------------------------------------------------------------
@@ -182,13 +165,7 @@ async def run_forever() -> None:
     server = uvicorn.Server(uvicorn.Config(web.app, host="0.0.0.0", port=CREDENTIALS_PORT, log_level="warning"))
     server_task = asyncio.create_task(server.serve())
 
-    token = store.get("telegram")
-    if not token:
-        print(f"Waiting for a Telegram bot token: set FRANK_TELEGRAM_KEY, or open http://localhost:{CREDENTIALS_PORT}/ and save one.")
-    while not token:
-        await asyncio.sleep(1.0)
-        token = store.get("telegram")
-
+    token = await wait_for_token(store, "telegram", port=CREDENTIALS_PORT)
     application = build_app(token, store)
     async with application:
         await application.start()
