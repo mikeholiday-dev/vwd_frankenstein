@@ -13,6 +13,8 @@ output, asks the operator, and installs. It never trusts a pass/fail claim from 
   permission the bundle doesn't declare itself; they're copied next to the code for every test run.
   A bundle's own copy of the harness-written `frank.py` / `_frank_uses/` is dropped from the snapshot
 - `run_tests` is shared with Host.retest, the "re-run the stored tests" primitive for capability_doctor
+- `permissions.secrets` (vault.py): each must be offered in this run and bound to a host the manifest
+  declares; the operator sees the secrets on the card, and tests run with them granted
 
 TODO(A): prompt_skill: run eval cases + LLM judge instead of pytest. Refused until then.
 """
@@ -42,6 +44,7 @@ from harness.contracts import (
     TestReport,
     permissions_diff,
 )
+from harness.kernel import vault
 from harness.kernel.compose import RESERVED, UsesError, dependencies, resolve, vendor
 from harness.ops.events import EventLog
 
@@ -64,7 +67,7 @@ def run_tests(
         vendor(list(uses), work)
         r = sandbox.run(
             work, TEST_ARGV, phase=Phase.TEST, network=manifest.permissions.network, deps=deps,
-            registry_ro=manifest.permissions.filesystem == "registry_ro",
+            registry_ro=manifest.permissions.filesystem == "registry_ro", secrets=manifest.permissions.secrets,
         )
     report = TestReport(
         ref=manifest.ref,
@@ -146,6 +149,8 @@ class Gate:
             return f"missing {CODE_FILE}"
         if not any((bundle / TESTS_DIR).glob("test_*.py")):
             return f"no {TESTS_DIR}/test_*.py: nothing gets installed without tests"
+        if reason := vault.problem(manifest.permissions):
+            return reason
         installed = self._versions(manifest.name)
         if manifest.version in installed:
             return f"{manifest.ref} is already installed; bump the version"

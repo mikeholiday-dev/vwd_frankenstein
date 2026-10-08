@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from conftest import BUNDLES
+from harness import config
 from harness.contracts import CODE_FILE, EventType
 from harness.fakes import AutoApprover
 from harness.kernel.gate import Gate
@@ -45,6 +46,7 @@ def logged_test_runs(events):
         ({"version": 2}, "version must be 1"),
         ({"version": "1"}, "positive integer"),
         ({"kind": "prompt_skill"}, "aren't supported yet"),
+        ({"permissions": {"network": ["api.apify.com"], "secrets": ["APIFY_TOKEN"]}}, "isn't offered"),
     ],
 )
 def test_refused_before_any_test_runs(gate, registry, events, tmp_path, changes, reason):
@@ -133,3 +135,12 @@ def test_test_dependencies_reach_test_runs_but_not_calls(gate, sandbox, registry
 
     assert gate.submit(b).installed
     assert Host(sandbox, registry, events).call("echo", {"text": "ahoj"}).output == {"echo": "ahoj", "six": False}
+
+
+def test_refuses_a_secret_its_hosts_never_receive(gate, registry, events, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "SECRETS", ["APIFY_TOKEN"])
+    monkeypatch.setenv("APIFY_TOKEN", "k")
+    result = gate.submit(bundle(tmp_path, "b", permissions={"network": ["evil.example"], "secrets": ["APIFY_TOKEN"]}))
+
+    assert not result.installed and "never sent" in result.reason
+    assert logged_test_runs(events) == []

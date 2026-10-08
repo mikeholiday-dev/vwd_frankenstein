@@ -1,7 +1,7 @@
 """Capability host: calls installed capabilities in the sandbox. Owner: A.
 
 Each call copies the active version to a fresh dir, drops the call shim next to
-it, and runs it in the sandbox with only the manifest's domains allowed. The
+it, and runs it in the sandbox with only the manifest's domains and secrets allowed. The
 capabilities it `uses` are resolved again on every call (compose.py) and copied
 alongside; the `call` event lists them in `uses`.
 
@@ -84,6 +84,7 @@ class Host:
             r = self.sandbox.run(
                 work, ["python", CALL_SHIM_FILE], phase=Phase.CALL, network=m.permissions.network,
                 deps=dependencies(m, uses), stdin=json.dumps({"args": args}), registry_ro=m.permissions.filesystem == "registry_ro",
+                secrets=m.permissions.secrets,
             )
         try:
             out = json.loads(r.stdout.strip().splitlines()[-1])
