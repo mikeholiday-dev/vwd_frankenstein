@@ -16,6 +16,8 @@ Contract with the rest of the harness:
 - ctx.budget counts every model turn, gap and repair, and is checked before every tool call
 - on start, every active capability in ctx.registry is a tool (fresh-session composition);
   capabilities installed mid-session are called through `invoke_capability`
+- the operator's attached files (`frank run --attach`) reach capability calls through ctx.host.attach; the
+  planner is told their paths, and build roles can open them in `sandbox_exec` (never in the installed bundle)
 - prompts live in prompts/*.md and must pass tests/test_prompt_hygiene.py
 - every model call goes through model.run_role (claude-agent-sdk, built-in tools off)
 """
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +34,7 @@ from typing import Any
 
 from harness.agent import model, tools
 from harness.agent.model import Stop, ToolSpec, obj
+from harness.kernel import compose
 from harness.contracts import CODE_FILE, MANIFEST_FILE, TESTS_DIR, CallResult, EventType, Gap, InstallResult, Kind, Manifest
 from harness.wiring import Context
 
@@ -45,9 +49,19 @@ FEEDBACK_CHARS = 8_000  # test output handed to the repair role
 ANSWER_RETRIES = 1  # how often an answer without provenance is sent back before it's accepted and flagged
 
 
-def run_session(task: str, ctx: Context) -> str:
-    """Run one task to an answer. Returns the answer text (also emitted as ANSWER)."""
-    return Session(ctx).run(task)
+INPUTS_DIR = "_frank_inputs"  # where Host.attach puts the operator's files for a call, relative to its working dir
+
+
+def run_session(task: str, ctx: Context, attach: list[Path] = ()) -> str:
+    """Run one task to an answer. Returns the answer text (also emitted as ANSWER).
+
+    `attach`: the operator's input files for this session. Calls see them read-only at `_frank_inputs/<name>`.
+    """
+    session = Session(ctx)
+    if attach:
+        ctx.host.attach(*attach)  # on kernel.host.Host, not yet on the CapabilityHost Protocol
+        session.inputs = {Path(p).name: Path(p).resolve() for p in attach}
+    return session.run(task)
 
 
 def prompt(name: str) -> str:
@@ -62,6 +76,7 @@ class Session:
     built: list[str] = field(default_factory=list)
     answer: str | None = None
     rejected_answers: int = 0
+    inputs: dict[str, Path] = field(default_factory=dict)  # attached files by name
 
     # ---- planner ---------------------------------------------------------------
 
@@ -70,12 +85,18 @@ class Session:
         listing = "\n".join(f"- {e.manifest.ref}: {e.manifest.description} | input {json.dumps(e.manifest.interface.get('input', {}))}" for e in installed)
         text = model.run_role(
             self.ctx, "planner", PLANNER_MODEL, prompt("planner"),
-            f"Task:\n{task}\n\nInstalled capabilities:\n{listing or '(none)'}",
+            f"Task:\n{task}\n\n{self._inputs_brief()}Installed capabilities:\n{listing or '(none)'}",
             self.planner_tools([e.manifest for e in installed]),
         )  # fmt: skip
         if self.answer is None:  # the planner stopped without submitting: keep what it said, flagged
             self._emit_answer(text or "(no answer)", [], "missing")
         return self.answer
+
+    def _inputs_brief(self) -> str:
+        if not self.inputs:
+            return ""
+        paths = ", ".join(f"{INPUTS_DIR}/{n}" for n in self.inputs)
+        return f"Attached files: {paths}\nA capability call can open these paths. Pass a path as a plain string argument; you cannot read the files yourself.\n\n"
 
     def planner_tools(self, installed: list[Manifest]) -> list[ToolSpec]:
         ctx = self.ctx
@@ -159,6 +180,12 @@ class Session:
         bundle = gap.id
         (ctx.workdir / bundle).mkdir(parents=True, exist_ok=True)
         spec = f"Gap:\n{json.dumps(vars(gap), ensure_ascii=False, indent=2)}\n\n{self._upgrade_brief(upgrade)}"
+        if self.inputs:
+            spec += (
+                f"\nThe operator attached files to this session: {', '.join(f'{INPUTS_DIR}/{n}' for n in self.inputs)}. A capability call can open those paths, "
+                "and so can a command you run in the sandbox while building. They are not there when the tests run, and they never become part of the "
+                "bundle: tests need their own sample files."
+            )
 
         self._role("builder", BUILDER_MODEL, "builder", spec, bundle, attempt=1)
         self._role("tester", TESTER_MODEL, "tester", spec + "\nThe builder's files are in the workspace. Read them, then write the tests.", bundle, attempt=1)
@@ -198,6 +225,18 @@ class Session:
                 return v + 1
             v += 1
 
+    def _exec(self, bundle: str, argv: list[str], deps: list[str] | None) -> dict[str, Any]:
+        """`sandbox_exec` with the bundle looking the way a call would see it."""
+        root = self.ctx.workdir / bundle
+        _unstage(root)  # the harness writes these names; a role's own copies don't count
+        problem = _staged(self.inputs, self.ctx, root)
+        try:
+            if problem:
+                return {"exit_code": -1, "stdout": "", "stderr": f"[uses] {problem}"}
+            return tools.sandbox_exec(self.ctx, bundle, argv, deps)
+        finally:
+            _unstage(root)
+
     def _role(self, role: str, model_id: str, prompt_name: str, brief: str, bundle: str, attempt: int) -> str:
         """Run the builder, the tester or a repair in the bundle dir and log what it wrote."""
         ctx = self.ctx
@@ -229,7 +268,7 @@ class Session:
             ToolSpec("sandbox_exec", "Run a command in the bundle inside the sandbox to try something while building, e.g. "
                      '["python", "-c", "..."]. No network except the package index. This is not the install test run.',
                      obj({"argv": {"type": "array", "items": {"type": "string"}}}, {"deps": {"type": "array", "items": {"type": "string"}}}),
-                     lambda a: tools.sandbox_exec(ctx, bundle, a["argv"], a.get("deps"))),
+                     lambda a: self._exec(bundle, a["argv"], a.get("deps"))),
             ToolSpec("registry_list", "Manifests of every active installed capability.", obj(), lambda a: tools.registry_list(ctx)),
             ToolSpec("registry_read", "Manifest, code and tests of one installed capability.",
                      obj({"name": "string"}, {"version": "integer"}), lambda a: tools.registry_read(ctx, a["name"], a.get("version"))),
@@ -245,6 +284,35 @@ class Session:
         ctx.events.emit(EventType.BUILD, ref=ref, role=role, attempt=attempt, files=sorted(changed),
                         contents={k: v[:EVENT_FILE_CHARS] for k, v in changed.items()}, note=note[-2000:])  # fmt: skip
         return note
+
+
+def _staged(session_inputs: dict[str, Path], ctx: Context, root: Path) -> str:
+    """Put what a call would find next to the code into the bundle dir: attached files and the `uses` it resolves to.
+
+    Returns why `uses` can't be resolved, or "". `_unstage` removes it all again, so none of it reaches the gate.
+    """
+    if session_inputs:
+        (root / INPUTS_DIR).mkdir(exist_ok=True)
+        for name, src in session_inputs.items():
+            shutil.copyfile(src, root / INPUTS_DIR / name)
+    try:
+        manifest = Manifest.load(root)
+        if manifest.uses:
+            compose.vendor(compose.resolve(ctx.registry, manifest), root)
+    except compose.UsesError as e:
+        return str(e)
+    except Exception:  # no manifest yet, or not a valid one: nothing to resolve
+        return ""
+    return ""
+
+
+def _unstage(root: Path) -> None:
+    for name in (INPUTS_DIR, *compose.RESERVED):
+        target = root / name
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        else:
+            target.unlink(missing_ok=True)
 
 
 def tools_install(ctx: Context, bundle: str) -> InstallResult:

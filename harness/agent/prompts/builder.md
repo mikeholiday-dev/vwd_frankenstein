@@ -41,6 +41,20 @@ origin: { built_by: builder }
 uses: []
 ```
 
+## Reusing what is installed
+
+Before writing code, look at the registry. If an installed capability already does part of the job, call it instead of copying its code:
+
+- list it in the manifest: `uses: ["its_name"]` for the active version, or `"its_name@v2"` to pin one
+- call it in the code: `from frank import use`, then `use("its_name", field=value)` returns that capability's output dict
+- tests call your `run` the same way; the used capability is placed next to your code for every test run and call
+
+A used capability runs with your permissions, not its own. So your manifest must also declare every host and every other permission that the capabilities you use need, or the install is refused with a reason naming what is missing. Do not create a file named `frank.py` or a folder `_frank_uses`: the harness provides them.
+
+## File inputs
+
+A capability that works on a file takes the file's path as a string input and opens it for reading. The operator's files appear under `_frank_inputs/` at call time, and when you run a command in the sandbox while building, so you can look at a real example before deciding how to parse it. Write for the general document type, not for that one file, and never copy the file or its contents into the bundle. The tester has to create sample files of that type inside the tests, so also list in `dependencies` a package that can write that file type.
+
 ## Permissions
 
 Ask for the least that works. List every host the code really connects to, including one a redirect or a service description points to, and no others: at run time anything not listed is refused. No wildcards. A capability that only reads the registry needs no network at all.
@@ -53,8 +67,10 @@ You can run commands in the sandbox to check that the code imports and that pure
 
 When you are given a failed install, read the reason and the test output before changing anything.
 - A reason starting `refused:` is about the bundle's shape: fix exactly what it names.
+- A refusal saying a used capability needs something your manifest does not declare means: declare it in your `permissions`, since you take on what you use.
 - A line saying a host was refused by egress means the code connects to a host the manifest does not list. Add it only if the code truly needs it.
 - A failure under the previous version's tests means the upgrade changed behaviour that older callers rely on: restore it.
+- A test that fails importing a package it needs: add that package to `dependencies`.
 - Otherwise fix the code so the tests pass. Never special-case a test's input to make it pass.
 
 When done, reply with one short paragraph: what the capability does, which hosts it needs and why.

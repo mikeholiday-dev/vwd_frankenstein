@@ -237,3 +237,88 @@ def test_tool_schemas_are_valid_json_schema(ctx):
     for spec in loop.Session(ctx).planner_tools([]):
         assert spec.schema["type"] == "object" and set(spec.schema["required"]) <= set(spec.schema["properties"])
         json.dumps(spec.schema)
+
+
+READER = {
+    "capability.py": "from pathlib import Path\n\n\ndef run(path: str) -> dict:\n    return {\"text\": Path(path).read_text().strip()}\n",
+    "manifest.yaml": OK["manifest.yaml"].replace("name: echo", "name: read_text").replace("{text: string}", "{path: string}").replace("{echo: string}", "{text: string}"),
+    "tests/test_unit.py": "from capability import run\n\n\ndef test_reads(tmp_path):\n    (tmp_path / \"a.txt\").write_text(\"hi\\n\")\n    assert run(str(tmp_path / \"a.txt\")) == {\"text\": \"hi\"}\n",
+}
+
+
+def test_attached_file_reaches_builds_and_calls_but_not_the_bundle(ctx, script, tmp_path):
+    roles, seen = script
+    note = tmp_path / "note.txt"
+    note.write_text("faktura 42\n")
+    peeked = []
+
+    def builder(call):
+        for f in ("capability.py", "manifest.yaml"):
+            call("write_file", path=f, content=READER[f])
+        peeked.append(call("sandbox_exec", argv=["python", "-c", "print(open('_frank_inputs/note.txt').read())"])["stdout"].strip())
+
+    def planner(call):
+        assert call("report_gap", **GAP)["installed"]
+        out = call("invoke_capability", name="read_text", args={"path": "_frank_inputs/note.txt"})
+        call("submit_answer", text=out.output["text"], call_ids=[out.call_id])
+
+    roles.update(builder=builder, planner=planner, tester=lambda call: call("write_file", path="tests/test_unit.py", content=READER["tests/test_unit.py"]))
+    assert loop.run_session("what does the note say?", ctx, attach=[note]) == "faktura 42"
+
+    assert peeked == ["faktura 42"]
+    assert "Attached files: _frank_inputs/note.txt" in seen[0][2] and "_frank_inputs/note.txt" in seen[1][2]
+    installed = ctx.registry.get("read_text").path
+    assert not (installed / "_frank_inputs").exists()
+    assert not any("_frank_inputs" in f for e in events_of(ctx, EventType.BUILD) for f in e.data["files"])
+
+
+def test_builder_can_compose_an_installed_capability(ctx, script):
+    roles, _ = script
+    assert ctx.gate.submit(BUNDLES / "echo_ok").installed
+    code = "from frank import use\n\n\ndef run(text: str) -> dict:\n    return {\"echo\": use(\"echo\", text=text)[\"echo\"] * 2}\n"
+    manifest = OK["manifest.yaml"].replace("name: echo", "name: echo_twice").replace("uses: []", "uses: [echo]")
+    tests = "from capability import run\n\n\ndef test_twice():\n    assert run(\"ab\")[\"echo\"] == \"abab\"\n"
+    tried = []
+
+    def builder(call):
+        call("write_file", path="capability.py", content=code)
+        call("write_file", path="manifest.yaml", content=manifest)
+        tried.append(call("sandbox_exec", argv=["python", "-c", "from capability import run; print(run('x')['echo'])"])["stdout"].strip())
+
+    def planner(call):
+        assert call("report_gap", **GAP)["installed"]
+        out = call("invoke_capability", name="echo_twice", args={"text": "ha"})
+        call("submit_answer", text=out.output["echo"], call_ids=[out.call_id])
+
+    roles.update(builder=builder, planner=planner, tester=lambda call: call("write_file", path="tests/test_unit.py", content=tests))
+    assert loop.run_session("say ha twice", ctx) == "haha"
+
+    assert tried == ["xx"]  # the used capability was next to the code while building, as it is in a call
+    assert events_of(ctx, EventType.CALL)[0].data["uses"] == ["echo@v1"]
+    assert not any(f.startswith(("frank.py", "_frank_uses")) for e in events_of(ctx, EventType.BUILD) for f in e.data["files"])
+
+
+def test_unresolvable_uses_is_reported_to_the_builder(ctx, script):
+    roles, _ = script
+    results = []
+
+    def builder(call):
+        call("write_file", path="capability.py", content=OK["capability.py"])
+        call("write_file", path="manifest.yaml", content=OK["manifest.yaml"].replace("uses: []", "uses: [not_there]"))
+        results.append(call("sandbox_exec", argv=["python", "-c", "print(1)"]))
+
+    roles.update(builder=builder, planner=lambda call: call("report_gap", **GAP), repair=lambda call: call("write_file", path="manifest.yaml", content=OK["manifest.yaml"]))
+    loop.run_session("repeat", ctx)
+    assert "isn't installed" in results[0]["stderr"]
+    assert [e.manifest.ref for e in ctx.registry.list()] == ["echo@v1"]  # the gate refused it, the repair fixed it
+
+
+def test_cli_attach_refuses_a_missing_file(tmp_path, monkeypatch, capsys):
+    from harness import cli, config
+
+    monkeypatch.setattr(config, "FAKES", {"sandbox", "registry"})
+    for name in ("LOG_PATH", "REGISTRY_DIR", "WORK_DIR"):
+        monkeypatch.setattr(config, name, tmp_path / name.lower())
+    with pytest.raises(SystemExit):
+        cli.main(["run", "--attach", str(tmp_path / "nope.pdf"), "task"])
+    assert "not a file" in capsys.readouterr().err
