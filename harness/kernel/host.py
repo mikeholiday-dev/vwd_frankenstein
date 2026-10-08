@@ -5,6 +5,11 @@ it, and runs it in the sandbox with only the manifest's domains allowed. The
 capabilities it `uses` are resolved again on every call (compose.py) and copied
 alongside; the `call` event lists them in `uses`.
 
+`attach` makes the operator's files for this session (task 2's invoice PDF)
+readable by every call, read-only, at `_frank_inputs/<name>` relative to the
+call's working dir. The agent passes that path as an argument. Test runs don't
+see them: stored tests must not depend on one session's files.
+
 `retest` re-runs an installed version's stored tests: the primitive behind
 capability_doctor (stream B wraps it as a kernel tool).
 
@@ -25,6 +30,8 @@ from harness.kernel.compose import UsesError, dependencies, resolve, vendor
 from harness.kernel.gate import run_tests
 from harness.ops.events import EventLog
 
+INPUTS_DIR = "_frank_inputs"
+
 CALL_SHIM = """\
 import json, sys, traceback
 try:
@@ -39,6 +46,17 @@ except Exception as e:
 class Host:
     def __init__(self, sandbox: Sandbox, registry: Registry, events: EventLog):
         self.sandbox, self.registry, self.events = sandbox, registry, events
+        self.inputs: dict[str, Path] = {}
+
+    def attach(self, *paths: Path) -> list[str]:
+        """Hand the operator's files to every later call. Returns the paths a capability opens them at."""
+        for p in map(Path, paths):
+            if not p.is_file():
+                raise FileNotFoundError(f"{p} is not a file")
+            if p.name in self.inputs and self.inputs[p.name] != p.resolve():
+                raise ValueError(f"two inputs named {p.name}")
+            self.inputs[p.name] = p.resolve()
+        return [f"{INPUTS_DIR}/{n}" for n in self.inputs]
 
     def available(self):
         return self.registry.list()
@@ -57,6 +75,11 @@ class Host:
             work = Path(tmp) / "cap"
             shutil.copytree(entry.path, work)
             vendor(uses, work)
+            shutil.rmtree(work / INPUTS_DIR, ignore_errors=True)
+            if self.inputs:
+                (work / INPUTS_DIR).mkdir()
+                for n, src in self.inputs.items():
+                    shutil.copyfile(src, work / INPUTS_DIR / n)
             (work / CALL_SHIM_FILE).write_text(CALL_SHIM)
             r = self.sandbox.run(
                 work, ["python", CALL_SHIM_FILE], phase=Phase.CALL, network=m.permissions.network,
