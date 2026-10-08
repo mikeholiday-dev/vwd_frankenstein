@@ -6,6 +6,9 @@ for real over the fake sandbox and registry. Only the model's choices are script
 """
 
 import json
+import os
+import subprocess
+import sys
 from dataclasses import replace
 
 import pytest
@@ -85,7 +88,7 @@ def test_gap_is_built_installed_and_answered_with_provenance(ctx, script):
     assert (tester.data["role"], tester.data["files"]) == ("tester", ["tests/test_unit.py"])
     answer = events_of(ctx, EventType.ANSWER)[0].data
     assert answer["provenance"] == "ok" and answer["built"] == ["echo@v1"] and answer["reused"] == []
-    assert [(role, model_id) for role, model_id, _, _ in seen] == [("planner", loop.PLANNER_MODEL), ("builder", loop.BUILDER_MODEL), ("tester", loop.TESTER_MODEL)]
+    assert [(role, model_id) for role, model_id, _, _ in seen] == [("planner", loop.SONNET), ("builder", loop.SONNET), ("tester", loop.SONNET)]
 
 
 def test_failed_tests_are_repaired(ctx, script):
@@ -99,6 +102,7 @@ def test_failed_tests_are_repaired(ctx, script):
     assert [(e.data["role"], e.data["attempt"]) for e in events_of(ctx, EventType.BUILD)] == [("builder", 1), ("tester", 1), ("repair", 2)]
     assert [e.data["installed"] for e in events_of(ctx, EventType.INSTALL)] == [False, True]
     repair_prompt = next(prompt for role, _, prompt, _ in seen if role == "repair")
+    assert [model_id for role, model_id, _, _ in seen if role == "repair"] == [loop.OPUS]  # a refused build escalates to Opus
     assert "tests failed" in repair_prompt and "assert" in repair_prompt  # the gate's reason and the harness's own test output
     gap_id = events_of(ctx, EventType.GAP)[0].data["id"]
     assert ctx.budget.planner_turns == 1 and ctx.budget.gap_turns == {gap_id: 3}  # builder, tester and repair count against the gap
@@ -333,3 +337,10 @@ def test_write_file_works_through_a_symlinked_workdir(ctx, tmp_path):
 
     assert tools.write_file(replace(ctx, workdir=link), "gap-x/capability.py", "x = 1\n") == "gap-x/capability.py"
     assert (ctx.workdir / "gap-x" / "capability.py").read_text() == "x = 1\n"
+
+
+@pytest.mark.parametrize("env", [{"FRANK_MODE": "demo", "FRANK_MODELS": "cheap"}, {"FRANK_MODELS": "tiny"}])
+def test_cheap_models_are_refused_in_demo_mode_and_unknown_tiers_always(env):
+    env = {**os.environ, "FRANK_FAKE": "none", "FRANK_APPROVER": "cli", "FRANK_MODE": "dev", **env}
+    r = subprocess.run([sys.executable, "-c", "import harness.config"], env=env, capture_output=True, text=True)
+    assert r.returncode != 0 and "FRANK_MODELS" in r.stderr

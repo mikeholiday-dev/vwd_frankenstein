@@ -15,7 +15,7 @@ Full plan: [03-frankenstein-self-building-agent.md](03-frankenstein-self-buildin
 |---|---|
 | Language | Python 3.12 for the harness, and Python for capabilities generated in the sandbox |
 | Agent framework | Claude Agent SDK (Python) |
-| Models | `claude-sonnet-5-5` for planning and the runtime loop and as the tester · `claude-opus-5-5` as the tool builder · `claude-haiku-5-5` for cheap classification and LLM-judge scoring |
+| Models | `claude-sonnet-5-5` for planning and the runtime loop, as the tester and as the tool builder · `claude-opus-5-5` repairs a build the install gate refused · `claude-haiku-5-5` for cheap classification and LLM-judge scoring. `FRANK_MODELS=cheap` (rehearsals only, refused in demo mode) moves the planner and tester to Haiku and repairs to Sonnet |
 | Sandbox | Docker, one container per build, test or call. No secrets inside. Network only through the egress proxy |
 | Dependencies | `uv`, isolated per capability |
 | Registry | `registry/`, a git repo with one folder per capability and a git tag per version |
@@ -137,7 +137,9 @@ uv run python scripts/evidence.py                 # EVIDENCE.md from the event l
 uv run python scripts/package_submission.py       # submission/<timestamp>/: log, evidence, registry bundle; refuses a log with fake events
 ```
 
-`FRANK_MODE=demo` refuses every fake and the auto approver. Use it for the recorded run.
+`FRANK_MODE=demo` refuses every fake, the auto approver and `FRANK_MODELS=cheap`. Use it for the recorded run.
+
+`FRANK_MODELS=cheap uv run frank run ...` rehearses the plumbing (gate, approvals, events, console) on cheaper models. It says nothing about how well the demo models do.
 
 ### Rehearsal and the recorded run
 
