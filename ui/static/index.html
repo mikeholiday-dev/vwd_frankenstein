@@ -1,97 +1,553 @@
 <!doctype html>
-<!-- Owner: C. Bare-bones console that proves the wiring: live log, approval cards,
-     budget, registry, kill switch. Restyle/restructure freely; keep the /api contract. -->
+<!-- Owner: C. Operator console (plan §6): lab panel, approval cards with the permissions diff,
+     budget meters, registry with rollback/quarantine, kill switch. One file, no build step.
+     Everything is derived from the event log (/api/events) plus /api/registry and /api/config. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Frankenstein console</title>
 <style>
-  :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#666; --card:#fff; --line:#ddd; --ok:#1a7f37; --bad:#cf222e; --warn:#9a6700; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#999; --card:#1b1b1b; --line:#333; --ok:#3fb950; --bad:#f85149; --warn:#d29922; } }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
-  header { display:flex; gap:16px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); }
-  header h1 { font-size:16px; margin:0; flex:1; }
-  main { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap:16px; padding:16px; }
-  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
-  section { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:12px; min-width:0; }
-  h2 { font-size:13px; text-transform:uppercase; color:var(--muted); margin:0 0 8px; }
-  .ev { border-top:1px solid var(--line); padding:6px 0; }
-  .ev b { font-family:ui-monospace, monospace; font-size:12px; }
-  .ev small { color:var(--muted); }
-  pre { white-space:pre-wrap; word-break:break-word; font-size:12px; max-height:240px; overflow:auto; margin:4px 0; }
-  .card { border:2px solid var(--warn); border-radius:6px; padding:8px; margin-bottom:8px; }
-  .pass { color:var(--ok); } .fail { color:var(--bad); }
-  button { font:inherit; padding:4px 10px; cursor:pointer; }
-  #kill { background:var(--bad); color:#fff; border:0; border-radius:4px; }
-  table { width:100%; border-collapse:collapse; font-size:12px; } td { padding:3px 4px; border-top:1px solid var(--line); }
+  :root {
+    --bg:#f4f5f7; --fg:#16181d; --muted:#626a76; --card:#fff; --line:#dcdfe5; --soft:#eef0f3;
+    --ok:#17783a; --ok-bg:#e3f4e8; --bad:#c21f2b; --bad-bg:#fbe6e7; --warn:#8a5a00; --warn-bg:#fdf1d3; --info:#1d5fbf; --info-bg:#e4eefc;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0f1114; --fg:#e8eaee; --muted:#98a0ac; --card:#181b20; --line:#2b3038; --soft:#20242b;
+      --ok:#4cc26d; --ok-bg:#15301d; --bad:#ff6b6b; --bad-bg:#3a1a1c; --warn:#e3b341; --warn-bg:#352a0e; --info:#79b0ff; --info-bg:#152540;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--card); border-bottom:1px solid var(--line); padding:10px 16px; display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; }
+  header h1 { font-size:16px; margin:0; letter-spacing:.02em; }
+  header .grow { flex:1; }
+  header label { display:flex; gap:6px; align-items:center; min-width:0; max-width:100%; }
+  header select { min-width:0; max-width:min(420px, 100%); }
+  select, input[type=text], button { font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:5px 9px; }
+  button { cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--muted); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.primary { background:var(--ok); border-color:var(--ok); color:#fff; font-weight:600; }
+  button.danger { background:var(--bad); border-color:var(--bad); color:#fff; font-weight:600; }
+  .wrap { max-width:1400px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  .cols { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(0,1fr); gap:16px; align-items:start; }
+  .stack { display:grid; gap:16px; min-width:0; }
+  @media (max-width:900px) { .cols { grid-template-columns:1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; min-width:0; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; display:flex; gap:8px; align-items:center; }
+  h2 .count { background:var(--soft); border-radius:10px; padding:0 7px; color:var(--fg); }
+  .muted { color:var(--muted); } .mono { font-family:var(--mono); font-size:12px; }
+  .chip { display:inline-block; border-radius:10px; padding:1px 8px; font-size:12px; font-weight:600; background:var(--soft); color:var(--muted); white-space:nowrap; }
+  .chip.ok { background:var(--ok-bg); color:var(--ok); } .chip.bad { background:var(--bad-bg); color:var(--bad); }
+  .chip.warn { background:var(--warn-bg); color:var(--warn); } .chip.info { background:var(--info-bg); color:var(--info); }
+  .banner { border-radius:8px; padding:10px 14px; font-weight:600; }
+  .banner.bad { background:var(--bad-bg); color:var(--bad); border:1px solid var(--bad); }
+  .banner.warn { background:var(--warn-bg); color:var(--warn); border:1px solid var(--warn); }
+  pre { margin:6px 0 0; padding:8px 10px; background:var(--soft); border-radius:6px; font:12px/1.45 var(--mono); white-space:pre-wrap; word-break:break-word; max-height:320px; overflow:auto; }
+  details > summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  details[open] > summary { color:var(--fg); }
+
+  .task { font-size:15px; font-weight:600; margin-bottom:6px; }
+  .answer { margin-top:10px; border-left:3px solid var(--ok); padding:2px 0 2px 10px; }
+  .meters { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; }
+  @media (max-width:700px) { .meters { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .meter .label { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+  .meter .value { font-size:18px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .meter .value small { font-size:12px; font-weight:400; color:var(--muted); }
+  .bar { height:6px; background:var(--soft); border-radius:3px; overflow:hidden; margin-top:4px; }
+  .bar i { display:block; height:100%; background:var(--ok); border-radius:3px; transition:width .3s; }
+  .meter.warn .bar i { background:var(--warn); } .meter.hit .bar i { background:var(--bad); } .meter.hit .value { color:var(--bad); }
+
+  .item { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
+  .item:first-of-type { margin-top:0; }
+  .item.gap { border-left:3px solid var(--info); }
+  .item.cap.red { border-left:3px solid var(--bad); } .item.cap.green { border-left:3px solid var(--ok); } .item.cap.wait { border-left:3px solid var(--warn); }
+  .item .head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .item .head b { font-family:var(--mono); font-size:13px; }
+  .steps { list-style:none; margin:8px 0 0; padding:0; }
+  .steps li { padding:5px 0 5px 16px; border-left:2px solid var(--line); margin-left:4px; position:relative; }
+  .steps li::before { content:""; position:absolute; left:-5px; top:11px; width:8px; height:8px; border-radius:50%; background:var(--line); }
+  .steps li.pass::before { background:var(--ok); } .steps li.fail::before { background:var(--bad); } .steps li.wait::before { background:var(--warn); }
+  .kv { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:3px 12px; margin:8px 0; font-size:13px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; min-width:0; }
+  .add { color:var(--ok); font-weight:600; } .del { color:var(--bad); text-decoration:line-through; }
+  .tag { display:inline-block; font-family:var(--mono); font-size:12px; padding:0 6px; margin:1px 4px 1px 0; border-radius:4px; background:var(--soft); }
+  .tag.add { background:var(--ok-bg); } .tag.del { background:var(--bad-bg); }
+  .approval { border:2px solid var(--warn); border-radius:8px; padding:12px; margin-top:10px; }
+  .approval:first-of-type { margin-top:0; }
+  .approval .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .approval .actions input { flex:1; min-width:120px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-weight:500; color:var(--muted); font-size:12px; padding:0 6px 4px 0; }
+  td { padding:6px 6px 6px 0; border-top:1px solid var(--line); vertical-align:top; }
+  td.actions { white-space:nowrap; text-align:right; padding-right:0; }
+  td.actions select, td.actions button { padding:2px 6px; font-size:12px; }
+  tr.quarantined .name { text-decoration:line-through; color:var(--muted); }
+  .ev { display:grid; grid-template-columns:64px 150px minmax(0,1fr); gap:8px; padding:4px 0; border-top:1px solid var(--line); font-size:13px; }
+  .ev:first-child { border-top:0; }
+  .ev .t { color:var(--muted); font-variant-numeric:tabular-nums; } .ev .ty { font-family:var(--mono); font-size:12px; }
+  @media (max-width:600px) { .ev { grid-template-columns:56px minmax(0,1fr); } .ev .ty { display:none; } }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--bad); color:#fff; padding:8px 14px; border-radius:6px; display:none; z-index:10; }
 </style>
 </head>
 <body>
-<header><h1>Frankenstein</h1><span id="budget">budget: -</span><button id="kill">Kill switch</button></header>
-<main>
-  <section><h2>Log</h2><div id="log"></div></section>
-  <div>
-    <section><h2>Approvals</h2><div id="approvals"><small>none pending</small></div></section>
-    <section style="margin-top:16px"><h2>Registry</h2><table id="registry"></table></section>
+<header>
+  <h1>Frankenstein</h1>
+  <span id="mode"></span>
+  <span class="grow"></span>
+  <label class="muted">Run <select id="runs"><option value="">waiting for a run…</option></select></label>
+  <span id="status" class="chip">idle</span>
+  <span id="conn" class="chip">connecting</span>
+  <button id="kill" class="danger" data-act="kill">Kill switch</button>
+</header>
+<div class="wrap">
+  <div id="banners" class="stack" hidden></div>
+  <section id="run"><h2>Task</h2><div id="task" class="muted">No run yet. Start one with <span class="mono">frank run</span> or <span class="mono">scripts/fake_run.py</span>.</div></section>
+  <section><h2>Budget <span id="caps" class="muted" style="text-transform:none;letter-spacing:0"></span></h2><div id="meters" class="meters"></div></section>
+  <div class="cols">
+    <div class="stack">
+      <section><h2>Lab <span id="labcount" class="count">0</span></h2><div id="lab" class="muted">Gaps, builds and test runs appear here.</div></section>
+      <section><h2>Timeline <span id="evcount" class="count">0</span></h2><div id="timeline"></div></section>
+    </div>
+    <div class="stack">
+      <section><h2>Approvals <span id="apcount" class="count">0</span></h2><div id="approvals"></div></section>
+      <section><h2>Registry <span id="regcount" class="count">0</span></h2><div id="registry"></div></section>
+    </div>
   </div>
-</main>
+</div>
+<div id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const pending = new Map();
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const json = (v) => esc(typeof v === "string" ? v : JSON.stringify(v, null, 2));
+const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour12: false });
+const chip = (text, cls = "") => `<span class="chip ${cls}">${esc(text)}</span>`;
 
-function summary(e) {
+// ---- state, all derived from the event log --------------------------------
+const S = {
+  runs: new Map(),       // run_id -> run
+  order: [],             // run ids, oldest first
+  selected: null,        // null = follow the latest run
+  pending: new Map(),    // approval request id -> { data, run_id, ts }
+  requests: new Map(),   // approval request id -> { run_id, ref }
+  operator: [],          // events written by the console (kill, rollback, quarantine, decisions)
+  versions: new Map(),   // capability name -> Set of versions seen installed in the log
+  registry: [],
+  config: null,
+  lastId: -1,
+  killedAt: null,
+  open: new Map(),       // <details> the operator opened or closed, by data-key
+  dirty: new Set(["all"]),
+};
+
+function run(e) {
+  let r = S.runs.get(e.run_id);
+  if (!r) {
+    r = { id: e.run_id, session: e.session, task: "", plan: "", answer: null, status: "running", fake: false, started: e.ts,
+          budget: null, caps: [], errors: [], lab: [], capByRef: new Map(), events: [] };
+    S.runs.set(e.run_id, r);
+    S.order.push(e.run_id);
+    S.dirty.add("runs");
+  }
+  return r;
+}
+
+function cap(r, ref) {
+  let c = r.capByRef.get(ref);
+  if (!c) {
+    c = { kind: "cap", ref, steps: [], files: new Map(), built: false, state: "used", tone: "" };
+    r.capByRef.set(ref, c);
+    r.lab.push(c);
+  }
+  return c;
+}
+
+function apply(e) {
+  if (e.id <= S.lastId) return;  // EventSource reconnects replay from 0
+  S.lastId = e.id;
   const d = e.data;
+  S.dirty.add("timeline");
+
+  if (e.session === "ui" || e.type === "approval_decided") {
+    if (e.type === "approval_decided") {
+      const req = S.requests.get(d.request_id);
+      S.pending.delete(d.request_id);
+      S.dirty.add("approvals");
+      if (req) {
+        const r = S.runs.get(req.run_id);
+        const c = cap(r, req.ref);
+        c.steps.push({ type: "decision", ts: e.ts, d });
+        c.state = d.approved ? "approved" : "rejected"; c.tone = d.approved ? "green" : "red";
+        r.events.push(e);
+        S.dirty.add("lab");
+        return;
+      }
+    }
+    if (e.type === "kill") {
+      S.killedAt = e.ts;
+      S.pending.clear();
+      S.dirty.add("approvals").add("header");
+    }
+    if (e.type === "rollback" || e.type === "quarantine") loadRegistry();
+    S.operator.push(e);
+    return;
+  }
+
+  const r = run(e);
+  r.events.push(e);
+  if (d.fake) r.fake = true;
+  S.dirty.add("header").add("lab");
   switch (e.type) {
-    case "test_run": return `<span class="${d.passed ? "pass" : "fail"}">${d.passed ? "PASS" : "FAIL"}</span> ${esc(d.ref)}<pre>${esc(d.output)}</pre>`;
-    case "gap": return `${esc(d.gap)} <small>${esc(d.why)}</small>`;
-    case "install": return `${esc(d.ref)}: ${d.installed ? "installed" : "not installed"} (${esc(d.reason)})`;
-    case "call": return `${esc(d.ref)} ${d.ok ? "ok" : "error"} <small>${esc(d.call_id)}</small>`;
-    case "answer": return `<pre>${esc(d.text)}</pre><small>cites ${esc(d.call_ids.join(", "))}</small>`;
-    default: return `<pre>${esc(JSON.stringify(d))}</pre>`;
+    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.registryAtStart = d.registry; S.dirty.add("runs"); break;
+    case "plan": r.plan = d.text; break;
+    case "gap": r.lab.push({ kind: "gap", ts: e.ts, d }); break;
+    case "study": r.lab.push({ kind: "study", ts: e.ts, d }); break;
+    case "build": {
+      const c = cap(r, d.ref);
+      c.built = true; c.state = "building"; c.tone = "";
+      c.steps.push({ type: "build", ts: e.ts, d });
+      for (const [name, text] of Object.entries(d.contents || {})) c.files.set(name, { text, attempt: d.attempt, role: d.role });
+      break;
+    }
+    case "test_run": {
+      const c = cap(r, d.ref);
+      c.steps.push({ type: "test", ts: e.ts, d, id: e.id });
+      c.state = d.passed ? "tests pass" : "tests fail"; c.tone = d.passed ? "green" : "red";
+      break;
+    }
+    case "approval_requested": {
+      const c = cap(r, d.ref);
+      c.steps.push({ type: "request", ts: e.ts, d });
+      c.state = "awaiting approval"; c.tone = "wait";
+      if (d.code && !c.files.size) c.files.set("capability.py", { text: d.code });
+      S.requests.set(d.id, { run_id: e.run_id, ref: d.ref });
+      S.pending.set(d.id, { data: d, run_id: e.run_id, session: e.session, ts: e.ts, fake: !!d.fake });
+      S.dirty.add("approvals");
+      break;
+    }
+    case "install": {
+      const c = cap(r, d.ref);
+      c.steps.push({ type: "install", ts: e.ts, d });
+      c.state = d.installed ? "installed" : "not installed"; c.tone = d.installed ? "green" : "red";
+      if (d.installed) {
+        const [name, v] = d.ref.split("@v");
+        if (!S.versions.has(name)) S.versions.set(name, new Set());
+        S.versions.get(name).add(Number(v));
+      }
+      loadRegistry();
+      break;
+    }
+    case "call": cap(r, d.ref).steps.push({ type: "call", ts: e.ts, d, id: e.id }); break;
+    case "answer": r.answer = d; break;
+    case "budget": r.budget = d; break;
+    case "cap_hit": r.caps.push(d); break;
+    case "error": r.errors.push(d.message); break;
+    case "run_finished":
+      r.status = d.status;
+      if (d.budget) r.budget = d.budget;
+      for (const [id, p] of S.pending) if (p.run_id === r.id) S.pending.delete(id);
+      S.dirty.add("approvals").add("runs");
+      break;
   }
 }
 
-function renderApprovals() {
-  if (!pending.size) { $("approvals").innerHTML = "<small>none pending</small>"; return; }
-  $("approvals").innerHTML = [...pending.values()].map((d) => `
-    <div class="card"><b>${esc(d.ref)}</b> ${esc(d.manifest.description)}
-      <div>domains: ${esc(d.manifest.permissions.network.join(", ") || "none")}</div>
-      <div>permissions diff: <code>${esc(JSON.stringify(d.permissions_diff))}</code></div>
-      <div>tests: <span class="${d.test_report.passed ? "pass" : "fail"}">${d.test_report.passed ? "passed" : "failed"}</span></div>
-      <details><summary>code</summary><pre>${esc(d.code)}</pre></details>
-      <button onclick="decide('${d.id}', true)">Approve</button> <button onclick="decide('${d.id}', false)">Reject</button>
-    </div>`).join("");
+const current = () => S.runs.get(S.selected ?? S.order[S.order.length - 1]);
+
+// ---- rendering ----------------------------------------------------------------
+function details(key, summary, body, openByDefault = false) {
+  const open = S.open.has(key) ? S.open.get(key) : openByDefault;
+  return `<details data-key="${esc(key)}"${open ? " open" : ""}><summary>${summary}</summary>${body}</details>`;
 }
 
-async function decide(id, approved) {
-  await fetch(`/api/approvals/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved }) });
+const STATUS = { running: "info", ok: "ok", failed: "bad", killed: "bad", capped: "warn" };
+
+function renderHeader() {
+  const r = current();
+  const c = S.config;
+  $("mode").innerHTML = !c ? "" : (c.mode === "demo" ? chip("demo mode", "ok") : chip("dev mode"))
+    + (c.fakes.length ? " " + chip("fake " + c.fakes.join(" + "), "warn") : "") + " " + chip("auth: " + c.auth);
+  $("status").className = "chip " + (r ? STATUS[r.status] || "" : "");
+  $("status").textContent = r ? r.status : "idle";
+
+  const banners = [];
+  if (r?.fake) banners.push(`<div class="banner warn">Scripted fake run (scripts/fake_run.py). Nothing here was built, tested or installed for real.</div>`);
+  if (r && r.status === "killed") banners.push(`<div class="banner bad">Run stopped by the kill switch.</div>`);
+  else if (S.killedAt && r?.status === "running" && S.killedAt > r.started) banners.push(`<div class="banner bad">Kill sent at ${clock(S.killedAt)}. Waiting for the run to stop.</div>`);
+  for (const h of r?.caps || []) banners.push(`<div class="banner bad">Cap hit: ${esc(h.limit)} reached ${esc(h.value)} (max ${esc(h.max)}). The harness stopped the work.</div>`);
+  for (const m of r?.errors || []) banners.push(`<div class="banner warn">${esc(m)}</div>`);
+  $("banners").hidden = !banners.length;
+  $("banners").innerHTML = banners.join("");
+
+  if (r) {
+    const started = r.registryAtStart ? `<div class="muted">Registry at start: ${r.registryAtStart.length ? r.registryAtStart.map((x) => `<span class="tag">${esc(x)}</span>`).join("") : "empty"}</div>` : "";
+    const answer = r.answer ? `<div class="answer"><div>${esc(r.answer.text)}</div><div class="muted">Cites ${r.answer.call_ids.length ? r.answer.call_ids.map((x) => `<span class="tag">${esc(x)}</span>`).join("") : "no calls"}</div></div>` : "";
+    $("task").className = "";
+    $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>`
+      + `<div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}`
+      + (r.plan ? `<div style="margin-top:6px"><span class="muted">Plan:</span> ${esc(r.plan)}</div>` : "") + answer;
+  }
+
+  const lim = r?.budget?.limits || c?.limits;
+  if (!lim) return;
+  const b = r?.budget || { usd: 0, turns: 0, gaps: 0, minutes: 0 };
+  const hit = new Set((r?.caps || []).map((h) => h.limit));
+  const meter = (key, label, value, shown, unit) => {
+    const pct = Math.min(100, (value / lim[key]) * 100);
+    const cls = hit.has(key) || value > lim[key] ? "hit" : pct >= 80 ? "warn" : "";
+    return `<div class="meter ${cls}"><div class="label"><span>${label}</span><span>${Math.round(pct)}%</span></div>
+      <div class="value">${shown} <small>/ ${unit}</small></div><div class="bar"><i style="width:${pct}%"></i></div></div>`;
+  };
+  $("meters").innerHTML = meter("usd", "Spend (API-equivalent)", b.usd, "$" + Number(b.usd).toFixed(2), "$" + lim.usd.toFixed(2))
+    + meter("turns", "Agent turns", b.turns, b.turns, lim.turns)
+    + meter("gaps", "Gaps this run", b.gaps, b.gaps, lim.gaps)
+    + meter("minutes", "Run time", b.minutes, Number(b.minutes).toFixed(1), lim.minutes + " min");
+  $("caps").innerHTML = `· also capped: ${lim.repairs_per_gap} repairs per gap${hit.has("repairs_per_gap") ? " " + chip("hit", "bad") : ""}, ${lim.sandbox_seconds} s per sandbox run`;
+}
+
+function renderRuns() {
+  const opts = [`<option value="">Latest (follow)</option>`];
+  for (const id of [...S.order].reverse()) {
+    const r = S.runs.get(id);
+    opts.push(`<option value="${esc(id)}"${S.selected === id ? " selected" : ""}>${esc(r.session)} · ${clock(r.started)} · ${esc(r.status)} · ${esc((r.task || "direct install").slice(0, 50))}</option>`);
+  }
+  $("runs").innerHTML = opts.join("");
+}
+
+function ioTable(obj) {
+  return Object.entries(obj || {}).map(([k, v]) => `<span class="tag">${esc(k)}: ${esc(v)}</span>`).join("") || "<span class='muted'>none</span>";
+}
+
+function renderStep(s, c, r) {
+  const d = s.d;
+  const t = `<span class="muted">${clock(s.ts)}</span>`;
+  switch (s.type) {
+    case "build":
+      return `<li>${t} <b>${esc(d.role)}</b> · attempt ${esc(d.attempt)}${d.files ? ` · <span class="muted">${esc(d.files.join(", "))}</span>` : ""}</li>`;
+    case "test": {
+      const last = c.steps.filter((x) => x.type === "test").pop() === s;
+      const meta = [d.duration_s != null ? d.duration_s.toFixed(1) + " s" : "", d.sandbox_run_id ? "sandbox run " + d.sandbox_run_id : ""].filter(Boolean).join(" · ");
+      return `<li class="${d.passed ? "pass" : "fail"}">${t} ${chip(d.passed ? "tests passed" : "tests failed", d.passed ? "ok" : "bad")} <span class="muted">${esc(meta)}</span>
+        ${details(`test-${s.id}`, "test output", `<pre>${esc(d.output)}</pre>`, last || !d.passed)}</li>`;
+    }
+    case "request": return `<li class="wait">${t} approval requested from the operator</li>`;
+    case "decision":
+      return `<li class="${d.approved ? "pass" : "fail"}">${t} ${chip(d.approved ? "approved" : "rejected", d.approved ? "ok" : "bad")} by ${esc(d.by)}${d.reason ? ` · “${esc(d.reason)}”` : ""}</li>`;
+    case "install":
+      return `<li class="${d.installed ? "pass" : "fail"}">${t} ${chip(d.installed ? "installed" : "not installed", d.installed ? "ok" : "bad")} <span class="muted">${esc(d.reason)}</span></li>`;
+    case "call": {
+      const body = `<pre>${json({ args: d.args, output: d.output, error: d.error || undefined })}</pre>`;
+      return `<li class="${d.ok ? "pass" : "fail"}">${t} call <span class="tag">${esc(d.call_id)}</span> ${chip(d.ok ? "ok" : "error", d.ok ? "ok" : "bad")}
+        ${d.duration_s != null ? `<span class="muted">${d.duration_s.toFixed(2)} s</span>` : ""}${details(`call-${s.id}`, "arguments and output", body)}</li>`;
+    }
+  }
+  return "";
+}
+
+function renderLab() {
+  const r = current();
+  if (!r || !r.lab.length) { $("lab").className = "muted"; $("lab").textContent = "Gaps, builds and test runs appear here."; $("labcount").textContent = 0; return; }
+  $("lab").className = "";
+  $("labcount").textContent = r.lab.filter((x) => x.kind === "cap").length;
+  $("lab").innerHTML = r.lab.map((x) => {
+    if (x.kind === "gap") {
+      const d = x.d;
+      return `<div class="item gap"><div class="head">${chip("gap", "info")} <span>${esc(d.gap)}</span> <span class="muted">${clock(x.ts)}</span></div>
+        <dl class="kv"><dt>Why</dt><dd>${esc(d.why)}</dd><dt>Needs</dt><dd>${ioTable(d.inputs)}</dd><dt>Returns</dt><dd>${ioTable(d.outputs)}</dd>
+        <dt>Kind</dt><dd>${esc(d.kind)}</dd>${d.registry_search ? `<dt>Registry search</dt><dd>${esc(d.registry_search)}</dd>` : ""}</dl></div>`;
+    }
+    if (x.kind === "study") return `<div class="item"><div class="head">${chip("study")} <span>${esc(x.d.query)}</span> <span class="muted">${clock(x.ts)}</span></div></div>`;
+    const tone = { green: "ok", red: "bad", wait: "warn" }[x.tone] || "";
+    const files = [...x.files].map(([name, f]) =>
+      details(`file-${r.id}-${x.ref}-${name}`, `<span class="mono">${esc(name)}</span>${f.attempt ? ` <span class="muted">from ${esc(f.role)}, attempt ${esc(f.attempt)}</span>` : ""}`, `<pre>${esc(f.text)}</pre>`)).join("");
+    return `<div class="item cap ${x.tone}"><div class="head"><b>${esc(x.ref)}</b> ${chip(x.built ? x.state : "reused", x.built ? tone : "info")}</div>
+      <ul class="steps">${x.steps.map((s) => renderStep(s, x, r)).join("")}</ul>${files}</div>`;
+  }).join("");
+}
+
+function permRows(m, prev, diff) {
+  const p = m.permissions || {}, old = prev?.permissions || {};
+  const list = (key) => {
+    const added = new Set(diff?.added?.[key] || []), removed = diff?.removed?.[key] || [];
+    const now = (p[key] || []).map((x) => `<span class="tag ${added.has(x) ? "add" : ""}">${added.has(x) ? "+ " : ""}${esc(x)}</span>`);
+    const gone = removed.map((x) => `<span class="tag del">− ${esc(x)}</span>`);
+    return now.concat(gone).join("") || "<span class='muted'>none</span>";
+  };
+  const fsChanged = prev && (old.filesystem || "none") !== (p.filesystem || "none");
+  const fs = fsChanged ? `<span class="tag del">− ${esc(old.filesystem || "none")}</span><span class="tag add">+ ${esc(p.filesystem)}</span>` : `<span class="tag">${esc(p.filesystem || "none")}</span>`;
+  return `<dt>Network</dt><dd>${list("network")}</dd><dt>Filesystem</dt><dd>${fs}</dd><dt>Secrets</dt><dd>${list("secrets")}</dd>`;
+}
+
+function renderApprovals() {
+  $("apcount").textContent = S.pending.size;
+  if (!S.pending.size) { $("approvals").innerHTML = "<span class='muted'>Nothing waiting for a decision.</span>"; return; }
+  $("approvals").innerHTML = [...S.pending.values()].map(({ data: d, session, ts, fake }) => {
+    const m = d.manifest, prev = d.previous, rep = d.test_report;
+    const changes = Object.keys(d.permissions_diff?.added || {}).length + Object.keys(d.permissions_diff?.removed || {}).length;
+    const headline = prev
+      ? `${chip("upgrade from v" + prev.version, "info")} ${changes ? chip("permissions change", "warn") : chip("same permissions", "ok")}`
+      : `${chip("new capability", "info")} ${changes ? chip("asks for permissions", "warn") : chip("no permissions", "ok")}`;
+    return `<div class="approval"><div class="head"><b class="mono">${esc(d.ref)}</b> ${headline} ${fake ? chip("fake", "warn") : ""}</div>
+      <div style="margin:6px 0">${esc(m.description)}</div>
+      <div class="muted">Session ${esc(session)} · requested ${clock(ts)}</div>
+      <dl class="kv">${permRows(m, prev, d.permissions_diff)}
+        <dt>Input</dt><dd>${ioTable(m.interface?.input)}</dd><dt>Output</dt><dd>${ioTable(m.interface?.output)}</dd>
+        <dt>Dependencies</dt><dd>${(m.dependencies || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("") || "<span class='muted'>none</span>"}</dd>
+        <dt>Tests</dt><dd>${chip(rep.passed ? "passed" : "failed", rep.passed ? "ok" : "bad")} <span class="muted">run by the harness${rep.sandbox_run_id ? ", sandbox run " + esc(rep.sandbox_run_id) : ""}</span></dd></dl>
+      ${details(`ap-test-${d.id}`, "test output", `<pre>${esc(rep.output)}</pre>`, !rep.passed)}
+      ${details(`ap-code-${d.id}`, "code", `<pre>${esc(d.code)}</pre>`)}
+      ${details(`ap-manifest-${d.id}`, "full manifest", `<pre>${json(m)}</pre>`)}
+      <div class="actions"><input type="text" id="reason-${esc(d.id)}" placeholder="Reason (optional)" maxlength="200">
+        <button class="primary" data-act="approve" data-id="${esc(d.id)}"${rep.passed ? "" : " disabled title='Tests failed'"}>Approve</button>
+        <button data-act="reject" data-id="${esc(d.id)}">Reject</button></div></div>`;
+  }).join("");
+}
+
+function renderRegistry() {
+  $("regcount").textContent = S.registry.length;
+  if (!S.registry.length) { $("registry").innerHTML = "<span class='muted'>Empty. Only the agent adds capabilities, through the install gate.</span>"; return; }
+  $("registry").innerHTML = `<table><tr><th>Capability</th><th>Reaches</th><th></th></tr>` + S.registry.map((e) => {
+    const m = e.manifest, q = e.status === "quarantined";
+    const seen = new Set(S.versions.get(m.name) || []);
+    for (let v = 1; v < m.version; v++) seen.add(v);
+    seen.delete(m.version);
+    const others = [...seen].sort((a, b) => b - a);
+    const rollback = others.length
+      ? `<select id="rb-${esc(m.name)}" aria-label="Version to roll back to">${others.map((v) => `<option value="${v}">v${v}</option>`).join("")}</select> <button data-act="rollback" data-name="${esc(m.name)}">Roll back</button> `
+      : "";
+    return `<tr class="${q ? "quarantined" : ""}"><td><span class="mono name">${esc(m.name)}@v${esc(m.version)}</span> ${q ? chip("quarantined", "bad") : chip("active", "ok")}
+        <div class="muted">${esc(m.description)}</div><div class="muted">${e.installed_at ? "installed " + esc(e.installed_at.replace("T", " ").slice(0, 16)) : ""}</div></td>
+      <td>${(m.permissions.network || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("") || "<span class='muted'>no network</span>"}</td>
+      <td class="actions">${rollback}${q ? "" : `<button data-act="quarantine" data-name="${esc(m.name)}">Quarantine</button>`}</td></tr>`;
+  }).join("") + "</table>";
+}
+
+function line(e) {
+  const d = e.data;
+  switch (e.type) {
+    case "run_started": return `<b>${esc(d.task)}</b>`;
+    case "plan": return esc(d.text);
+    case "gap": return `${esc(d.gap)} <span class="muted">${esc(d.why)}</span>`;
+    case "study": return esc(d.query);
+    case "build": return `${esc(d.ref)} · ${esc(d.role)} attempt ${esc(d.attempt)}`;
+    case "test_run": return `${chip(d.passed ? "pass" : "fail", d.passed ? "ok" : "bad")} ${esc(d.ref)}`;
+    case "approval_requested": return `${esc(d.ref)} waits for the operator`;
+    case "approval_decided": return `${chip(d.approved ? "approved" : "rejected", d.approved ? "ok" : "bad")} by ${esc(d.by)}${d.reason ? ` · “${esc(d.reason)}”` : ""}`;
+    case "install": return `${esc(d.ref)} ${d.installed ? "installed" : "not installed"} <span class="muted">${esc(d.reason)}</span>`;
+    case "call": return `${esc(d.ref)} ${chip(d.ok ? "ok" : "error", d.ok ? "ok" : "bad")} <span class="tag">${esc(d.call_id)}</span>`;
+    case "answer": return esc(d.text);
+    case "budget": return `<span class="muted">$${esc(d.usd)} · ${esc(d.turns)} turns · ${esc(d.gaps)} gaps · ${esc(d.minutes)} min</span>`;
+    case "cap_hit": return `${chip("cap hit", "bad")} ${esc(d.limit)} = ${esc(d.value)} (max ${esc(d.max)})`;
+    case "rollback": return `${esc(d.name)} rolled back to v${esc(d.version)} by ${esc(d.by)}`;
+    case "quarantine": return `${esc(d.name)} quarantined by ${esc(d.by)}`;
+    case "kill": return `${chip("kill", "bad")} by ${esc(d.by)}`;
+    case "error": return `<span style="color:var(--bad)">${esc(d.message)}</span>`;
+    case "run_finished": return chip(d.status, STATUS[d.status] || "");
+    default: return `<span class="mono">${json(d)}</span>`;
+  }
+}
+
+function renderTimeline() {
+  const r = current();
+  const evs = (r ? r.events : []).concat(S.operator).sort((a, b) => b.id - a.id);
+  $("evcount").textContent = evs.length;
+  $("timeline").innerHTML = evs.slice(0, 400).map((e) =>
+    `<div class="ev"><span class="t">${clock(e.ts)}</span><span class="ty">${esc(e.type)}</span><span>${line(e)}</span></div>`).join("")
+    || "<span class='muted'>No events yet.</span>";
+}
+
+let scheduled = false;
+function schedule() {
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(() => {
+    scheduled = false;
+    const all = S.dirty.has("all"), has = (k) => all || S.dirty.has(k);
+    if (has("runs")) renderRuns();
+    if (has("header")) renderHeader();
+    if (has("lab")) renderLab();
+    if (has("approvals")) renderApprovals();
+    if (has("registry")) renderRegistry();
+    if (has("timeline")) renderTimeline();
+    S.dirty.clear();
+  });
+}
+
+// ---- actions ------------------------------------------------------------------
+function toast(msg) {
+  $("toast").textContent = msg;
+  $("toast").style.display = "block";
+  setTimeout(() => ($("toast").style.display = "none"), 4000);
+}
+
+async function post(url, body) {
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+    return true;
+  } catch (err) {
+    toast(`Failed: ${err.message}`);
+    return false;
+  }
 }
 
 async function loadRegistry() {
-  const rows = await (await fetch("/api/registry")).json();
-  $("registry").innerHTML = rows.length
-    ? rows.map((r) => `<tr><td>${esc(r.manifest.name)}@v${r.manifest.version}</td><td>${esc(r.status)}</td><td>${esc(r.manifest.permissions.network.join(", "))}</td></tr>`).join("")
-    : "<tr><td>empty</td></tr>";
+  try {
+    S.registry = await (await fetch("/api/registry")).json();
+    S.dirty.add("registry");
+    schedule();
+  } catch { /* the stream indicator already shows a dead server */ }
 }
 
-$("kill").onclick = () => fetch("/api/kill", { method: "POST" });
+// Destructive buttons need a second click within 4 s.
+function armed(btn, label) {
+  if (btn.dataset.armed) return true;
+  const old = btn.textContent;
+  btn.dataset.armed = "1";
+  btn.textContent = label;
+  setTimeout(() => { delete btn.dataset.armed; btn.textContent = old; }, 4000);
+  return false;
+}
 
-const es = new EventSource("/api/events");
-const TYPES = ["run_started","plan","gap","study","build","test_run","approval_requested","approval_decided","install","call","answer","budget","cap_hit","rollback","quarantine","kill","error","run_finished"];
-for (const t of TYPES) es.addEventListener(t, (msg) => {
-  const e = JSON.parse(msg.data);
-  if (e.type === "budget") { const d = e.data; $("budget").textContent = `$${d.usd} / ${d.limits.usd} · turns ${d.turns}/${d.limits.turns} · gaps ${d.gaps}/${d.limits.gaps}`; return; }
-  if (e.type === "approval_requested") { pending.set(e.data.id, e.data); renderApprovals(); }
-  if (e.type === "approval_decided") { pending.delete(e.data.request_id); renderApprovals(); }
-  if (["install", "rollback", "quarantine"].includes(e.type)) loadRegistry();
-  const div = document.createElement("div");
-  div.className = "ev";
-  div.innerHTML = `<b>${esc(e.type)}</b> <small>${esc(e.session)} · ${esc(e.ts.slice(11, 19))}</small> ${summary(e)}`;
-  $("log").prepend(div);
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-act]");
+  if (!btn) return;
+  const { act, id, name } = btn.dataset;
+  if (act === "approve" || act === "reject") {
+    btn.disabled = true;
+    const ok = await post(`/api/approvals/${encodeURIComponent(id)}`, { approved: act === "approve", reason: $(`reason-${id}`)?.value || "" });
+    if (!ok) btn.disabled = false;
+  } else if (act === "kill") {
+    if (armed(btn, "Click again to stop every run")) { delete btn.dataset.armed; btn.textContent = "Kill switch"; await post("/api/kill"); }
+  } else if (act === "quarantine") {
+    if (armed(btn, "Confirm")) await post(`/api/registry/${encodeURIComponent(name)}/quarantine`);
+  } else if (act === "rollback") {
+    await post(`/api/registry/${encodeURIComponent(name)}/rollback`, { version: Number($(`rb-${name}`).value) });
+  }
 });
+
+document.addEventListener("toggle", (ev) => {
+  const key = ev.target.dataset?.key;
+  if (key) S.open.set(key, ev.target.open);
+}, true);
+
+$("runs").addEventListener("change", (ev) => { S.selected = ev.target.value || null; S.dirty.add("all"); schedule(); });
+
+// ---- wiring -------------------------------------------------------------------
+const TYPES = ["run_started","plan","gap","study","build","test_run","approval_requested","approval_decided","install","call","answer","budget","cap_hit","rollback","quarantine","kill","error","run_finished"];
+const es = new EventSource("/api/events");
+// The log's own `error` events share a name with EventSource's connection error; only the former carry data.
+for (const t of TYPES) es.addEventListener(t, (msg) => {
+  if (msg instanceof MessageEvent) { apply(JSON.parse(msg.data)); schedule(); }
+  else { $("conn").className = "chip bad"; $("conn").textContent = "disconnected"; }
+});
+es.onopen = () => { $("conn").className = "chip ok"; $("conn").textContent = "live"; };
+
+fetch("/api/config").then((r) => r.json()).then((c) => { S.config = c; S.dirty.add("header"); schedule(); }).catch(() => {});
 loadRegistry();
+schedule();
 </script>
 </body>
 </html>
