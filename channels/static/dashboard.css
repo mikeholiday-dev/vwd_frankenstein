@@ -159,13 +159,18 @@ summary:hover .toggle-hint, summary:hover .chev { color:var(--info); border-colo
 .reg-table .actions button { padding:3px 9px; }
 tr.quarantined .name { text-decoration:line-through; color:var(--muted); }
 
-/* ---- approvals ---- */
-.approval { border:2px solid var(--warn); border-radius:8px; padding:10px 12px; margin-top:10px; }
-.approval:first-of-type { margin-top:0; }
+/* ---- approval modal: the page behind is inert until the operator decides ---- */
+.approval-modal { width:min(920px, 94vw); max-height:90vh; padding:0; overflow:auto; border:2px solid var(--warn); border-radius:12px; background:var(--card); color:var(--fg); box-shadow:0 20px 60px rgba(0,0,0,.45); }
+.approval-modal::backdrop { background:rgba(10,12,16,.7); backdrop-filter:blur(2px); }
+.approval-modal .modal-head { position:sticky; top:0; z-index:1; display:flex; gap:8px; align-items:center; padding:12px 16px; background:var(--card); border-bottom:1px solid var(--line); }
+.approval-modal .modal-head h2 { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--warn); }
+.approval-modal .modal-error { margin:0 16px 10px; }
+.approval-modal .actions { position:sticky; bottom:0; padding:12px 16px; margin:0; background:var(--card); border-top:1px solid var(--line); }
+.approval { padding:12px 16px; }
 .approval .head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .approval .desc { margin:6px 0 2px; }
-.approval .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-.approval .actions input { flex:1; min-width:120px; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:6px 8px; color:var(--fg); font-size:12px; }
+.approval-modal .actions { display:flex; flex-wrap:wrap; gap:8px; }
+.approval-modal .actions input { flex:1; min-width:120px; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:6px 8px; color:var(--fg); font-size:12px; }
 
 /* ---- credentials ---- */
 .cred-item { padding:6px 0; border-top:1px solid var(--line); }

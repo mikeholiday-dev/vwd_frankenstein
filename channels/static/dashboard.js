@@ -174,6 +174,8 @@ function ioTable(obj) {
 }
 
 function banner(cls, text) {
+  const slot = document.querySelector("#approvalModal[open] .modal-error");  // the modal covers the page's banners
+  if (slot && cls === "bad") { slot.textContent = text; slot.hidden = false; }
   const el = document.createElement("div");
   el.className = `banner ${cls}`;
   el.textContent = text;
@@ -293,7 +295,7 @@ function renderLab() {
   if (!r || !r.lab.length) { $("lab").className = "muted"; $("lab").textContent = "Gaps, builds and test runs of the selected run appear here."; $("labCount").textContent = 0; return; }
   $("lab").className = "";
   $("labCount").textContent = r.lab.filter((x) => x.kind === "cap").length;
-  $("lab").innerHTML = r.lab.map((x) => {
+  $("lab").innerHTML = [...r.lab].reverse().map((x) => {  // newest first, like the timeline
     if (x.kind === "gap") {
       const d = x.d;
       return `<div class="item gap"><div class="head">${chip("gap", "info")} <span>${esc(d.gap)}</span> <span class="muted">${clock(x.ts)}</span></div>
@@ -309,7 +311,7 @@ function renderLab() {
     const files = [...x.files].map(([name, f]) =>
       details(`file-${r.id}-${x.ref}-${name}`, `<span class="mono">${esc(name)}</span>${f.attempt ? ` <span class="muted">from ${esc(f.role)}, attempt ${esc(f.attempt)}</span>` : ""}`, `<pre>${esc(f.text)}</pre>`)).join("");
     return `<div class="item cap ${x.tone}"><div class="head"><b>${esc(x.ref)}</b> ${chip(x.built ? x.state : "reused", x.built ? tone : "info")}</div>
-      <ul class="steps">${x.steps.map((s) => renderStep(s, x)).join("")}</ul>${files}</div>`;
+      <ul class="steps">${[...x.steps].reverse().map((s) => renderStep(s, x)).join("")}</ul>${files}</div>`;
   }).join("");
 }
 
@@ -353,7 +355,7 @@ function renderTimeline() {
 function renderRunLog(runId) {
   const evs = (S.runs.get(runId)?.events || []).filter((e) => e.type !== "budget");  // budget: the meters show it live
   if (!evs.length) return `<div class="run-log"><div class="empty">No detail recorded for this run yet.</div></div>`;
-  return `<div class="run-log">${evs.map(evRow).join("")}</div>`;
+  return `<div class="run-log">${[...evs].reverse().map(evRow).join("")}</div>`;  // newest first, like the timeline
 }
 
 function refreshOpenRunLogs() {
@@ -378,17 +380,35 @@ function permRows(m, prev, diff) {
   return `<dt>Network</dt><dd>${list("network")}</dd><dt>Filesystem</dt><dd>${fs}</dd><dt>Secrets</dt><dd>${list("secrets")}</dd>`;
 }
 
+// One request at a time, oldest first, in a modal dialog: while an install waits for a decision the
+// rest of the page is inert and Escape doesn't close it, so the operator has to approve, reject or
+// pull the kill switch. The card is only rebuilt when the request shown changes, so a reason being
+// typed or an opened <details> survives other events arriving.
 function renderApprovals() {
-  $("apprCount").textContent = S.pending.size;
-  if (!S.pending.size) { $("approvals").className = "muted"; $("approvals").textContent = "Nothing waiting for a decision."; return; }
-  $("approvals").className = "";
-  $("approvals").innerHTML = [...S.pending.values()].map(({ data: d, session, ts, fake }) => {
-    const m = d.manifest || {}, prev = d.previous, rep = d.test_report || {};
-    const changes = Object.keys(d.permissions_diff?.added || {}).length + Object.keys(d.permissions_diff?.removed || {}).length;
-    const headline = prev
-      ? `${chip("upgrade from v" + prev.version, "info")} ${changes ? chip("permissions change", "warn") : chip("same permissions", "ok")}`
-      : `${chip("new capability", "info")} ${changes ? chip("asks for permissions", "warn") : chip("no permissions", "ok")}`;
-    return `<div class="approval"><div class="head"><b class="mono">${esc(d.ref)}</b> ${headline} ${fake ? chip("fake", "warn") : ""}</div>
+  const dlg = $("approvalModal");
+  const [first] = S.pending.values();
+  if (!first) {
+    if (dlg.open) dlg.close();
+    dlg.innerHTML = "";
+    delete dlg.dataset.id;
+    return;
+  }
+  if (dlg.dataset.id !== first.data.id) {
+    dlg.innerHTML = approvalCard(first);
+    dlg.dataset.id = first.data.id;
+  }
+  $("apprWaiting").textContent = S.pending.size === 1 ? "1 install waiting" : `1 of ${S.pending.size} installs waiting`;
+  if (!dlg.open) dlg.showModal();
+}
+
+function approvalCard({ data: d, session, ts, fake }) {
+  const m = d.manifest || {}, prev = d.previous, rep = d.test_report || {};
+  const changes = Object.keys(d.permissions_diff?.added || {}).length + Object.keys(d.permissions_diff?.removed || {}).length;
+  const headline = prev
+    ? `${chip("upgrade from v" + prev.version, "info")} ${changes ? chip("permissions change", "warn") : chip("same permissions", "ok")}`
+    : `${chip("new capability", "info")} ${changes ? chip("asks for permissions", "warn") : chip("no permissions", "ok")}`;
+  return `<div class="modal-head"><h2 id="approvalTitle">Approval needed</h2><span id="apprWaiting" class="count"></span></div>
+    <div class="approval"><div class="head"><b class="mono">${esc(d.ref)}</b> ${headline} ${fake ? chip("fake", "warn") : ""}</div>
       <div class="desc">${esc(m.description)}</div>
       <div class="muted small">Session ${esc(session)} · requested ${clock(ts)}</div>
       <dl class="kv">${permRows(m, prev, d.permissions_diff)}
@@ -398,10 +418,12 @@ function renderApprovals() {
       ${details(`ap-test-${d.id}`, "test output", `<pre>${esc(rep.output)}</pre>`, !rep.passed)}
       ${details(`ap-code-${d.id}`, "code", `<pre>${esc(d.code)}</pre>`)}
       ${details(`ap-manifest-${d.id}`, "full manifest", `<pre>${json(m)}</pre>`)}
-      <div class="actions"><input type="text" data-reason="${esc(d.id)}" value="${esc(S.reasons.get(d.id) || "")}" placeholder="Reason (optional)" maxlength="200">
-        <button class="ok" data-act="approve" data-id="${esc(d.id)}"${rep.passed ? "" : " disabled title='Tests failed'"}>Approve</button>
-        <button class="danger" data-act="reject" data-id="${esc(d.id)}">Reject</button></div></div>`;
-  }).join("");
+    </div>
+    <div class="banner bad modal-error" hidden></div>
+    <div class="actions"><input type="text" data-reason="${esc(d.id)}" value="${esc(S.reasons.get(d.id) || "")}" placeholder="Reason (optional)" maxlength="200" aria-label="Reason">
+      <button class="ok" data-act="approve" data-id="${esc(d.id)}"${rep.passed ? "" : " disabled title='Tests failed'"}>Approve</button>
+      <button class="danger" data-act="reject" data-id="${esc(d.id)}">Reject</button>
+      <button class="danger" data-act="kill" title="Stop every run instead of deciding">Kill switch</button></div>`;
 }
 
 // ---- registry and its git history -------------------------------------------------------------
@@ -682,6 +704,7 @@ document.addEventListener("toggle", (ev) => {
 }, true);
 
 $("runSelect").addEventListener("change", (ev) => select(ev.target.value));
+$("approvalModal").addEventListener("cancel", (ev) => ev.preventDefault());  // Escape: a decision is required
 
 // ---- new task -----------------------------------------------------------------------------------
 
@@ -720,6 +743,13 @@ $("newTask").addEventListener("submit", async (ev) => {
     button.disabled = false;
     setTimeout(() => { $("taskStatus").textContent = ""; }, 6000);
   }
+});
+
+// Enter runs the task, Shift+Enter adds a new line. Skip while an IME is composing or a run is already starting.
+$("taskInput").addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing) return;
+  ev.preventDefault();
+  if (!$("newTask").querySelector("button[type=submit]").disabled) $("newTask").requestSubmit();
 });
 
 // Start from scratch (dev only): archives everything to rehearsals/, the SSE "reset" event then reloads the page.

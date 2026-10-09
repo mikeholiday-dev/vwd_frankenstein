@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Owner: D. The one operator page (plan §6): start a task, approve installs from the full card
-     (manifest, permissions diff, harness test log, code), watch the selected run's lab, budget
+     (manifest, permissions diff, harness test log, code) in a modal that blocks the page until decided, watch the selected run's lab, budget
      and timeline, roll back or quarantine from the registry, kill one run or all of them, and
      enter channel credentials. Everything is derived from the shared event log (/api/events)
      plus /api/summary, /api/registry and /api/config. One file per concern (dashboard.css,
@@ -97,11 +97,6 @@
     <div class="stack">
 
       <div class="card">
-        <h2>Approvals <span id="apprCount" class="count">0</span></h2>
-        <div id="approvals" class="muted">Nothing waiting for a decision.</div>
-      </div>
-
-      <div class="card">
         <h2>Registry <span id="regCount" class="count">0</span></h2>
         <div id="registry"></div>
       </div>
@@ -121,6 +116,8 @@
   </section>
 
 </main>
+
+<dialog id="approvalModal" class="approval-modal" aria-labelledby="approvalTitle"></dialog>
 
 <script src="/dashboard.js"></script>
 </body>
