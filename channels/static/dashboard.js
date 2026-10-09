@@ -501,24 +501,46 @@ function renderStatusChart() {
   }).join("");
 }
 
-// One sequential hue, thin line, rounded cap, SVG <title> for the tooltip.
+// One sequential hue, thin line, rounded cap, SVG <title> for the tooltip. Drawn in real pixels (not a
+// stretched viewBox) so axis text stays crisp; value labels are thinned so they never collide.
 function renderSpendChart() {
   const el = $("spendChart");
   const runs = (S.summary?.runs || []).filter((r) => r.usd > 0).slice(0, 20).reverse();
   if (runs.length < 2) { el.innerHTML = `<div class="empty">Not enough runs yet for a trend.</div>`; return; }
-  const w = 560, h = 110, pad = 6;
+  const w = Math.max(el.clientWidth || 560, 240), h = 180;
+  const m = { l: 58, r: 22, t: 20, b: 40 };
+  const pw = w - m.l - m.r, ph = h - m.t - m.b;
   const max = Math.max(...runs.map((r) => r.usd), 0.01);
-  const x = (i) => pad + (i * (w - 2 * pad)) / (runs.length - 1);
-  const y = (v) => h - pad - (v / max) * (h - 2 * pad);
+  const rough = max / 3, mag = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 2.5, 5, 10].map((f) => f * mag).find((v) => v >= rough);
+  const top = Math.ceil(max / step) * step;
+  const dp = step < 0.01 ? 3 : 2;
+  const usd = (v, d = dp) => `$${v.toFixed(d)}`;
+  const x = (i) => m.l + (i * pw) / (runs.length - 1);
+  const y = (v) => m.t + ph - (v / top) * ph;
   const pts = runs.map((r, i) => [x(i), y(r.usd)]);
   const pline = pts.map((p) => p.join(",")).join(" ");
-  const area = `${pad},${h - pad} ${pline} ${w - pad},${h - pad}`;
-  const dots = pts.map(([px, py], i) => `<circle class="dot" cx="${px}" cy="${py}" r="3"><title>${esc(runs[i].task || runs[i].run_id)}: $${runs[i].usd.toFixed(3)}</title></circle>`).join("");
-  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-    <line class="baseline" x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}"/>
+  const area = `${m.l},${m.t + ph} ${pline} ${m.l + pw},${m.t + ph}`;
+  const yTicks = Array.from({ length: Math.round(top / step) + 1 }, (_, k) => k * step);
+  const grid = yTicks.map((v) => `<line class="${v ? "grid" : "baseline"}" x1="${m.l}" y1="${y(v)}" x2="${m.l + pw}" y2="${y(v)}"/>
+    <text class="tick" x="${m.l - 6}" y="${y(v)}" text-anchor="end" dominant-baseline="middle">${usd(v)}</text>`).join("");
+  // Label every k-th point (plus the last and the peak) so ~46px separate neighbouring labels.
+  const every = Math.ceil(46 / (pw / (runs.length - 1)));
+  const peak = runs.findIndex((r) => r.usd === max);
+  const last = runs.length - 1;
+  const shown = (i) => i === last || i === peak || (i % every === 0 && last - i >= every && Math.abs(i - peak) >= every);
+  const xTicks = runs.map((_, i) => shown(i) ? `<text class="tick" x="${x(i)}" y="${m.t + ph + 14}" text-anchor="middle">${i + 1}</text>` : "").join("");
+  const dots = pts.map(([px, py], i) => `<g><title>Run ${i + 1}: ${esc(runs[i].task || runs[i].run_id)} · ${usd(runs[i].usd, 3)}</title>
+    <circle class="hit" cx="${px}" cy="${py}" r="10"/><circle class="dot" cx="${px}" cy="${py}" r="4"/>
+    ${shown(i) ? `<text class="val" x="${px}" y="${py - 9}" text-anchor="middle">${usd(runs[i].usd, 3)}</text>` : ""}</g>`).join("");
+  el.innerHTML = `<svg width="${w}" height="${h}" role="img" aria-label="Spend per run in USD, oldest to newest">
+    ${grid}
     <polygon class="area" points="${area}"/>
     <polyline class="line" points="${pline}"/>
     ${dots}
+    ${xTicks}
+    <text class="axis-title" x="${m.l + pw / 2}" y="${h - 4}" text-anchor="middle">Run (oldest → newest)</text>
+    <text class="axis-title" transform="translate(12 ${m.t + ph / 2}) rotate(-90)" text-anchor="middle">USD per run</text>
   </svg>`;
 }
 
@@ -804,3 +826,4 @@ loadRegistry();
 loadCreds().catch(() => {});
 schedule();
 setInterval(loadSummary, 20000);  // fallback poll, in case an event was missed
+window.addEventListener("resize", renderSpendChart);  // the spend chart is drawn in pixels, not a stretched viewBox
