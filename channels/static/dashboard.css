@@ -78,6 +78,7 @@ button.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent; 
 .run-item > summary { list-style:none; cursor:pointer; padding:10px 12px; }
 .run-item > summary::-webkit-details-marker { display:none; }
 .run-item .head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:4px; }
+.run-item .run-kill { padding:3px 9px; flex-shrink:0; }
 .run-item .task { font-weight:600; font-size:13px; }
 .run-item .answer { margin-top:6px; border-left:3px solid var(--ok); padding:2px 0 2px 10px; }
 .run-item .answer.unverified { border-color:var(--bad); }

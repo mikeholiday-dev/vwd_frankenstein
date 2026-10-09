@@ -159,9 +159,10 @@ function renderRuns() {
   $("runs").innerHTML = runs.slice(0, 15).map((r) => {
     const tone = STATUS_TONE[r.status] || "";
     const open = S.openRuns.has(r.run_id);
+    const killBtn = r.status === "unfinished" ? `<button type="button" class="danger small run-kill" data-run="${esc(r.run_id)}">Kill this run</button>` : "";
     return `<details class="run-item" data-run="${esc(r.run_id)}"${open ? " open" : ""}>
       <summary>
-        <div class="head">${chip(STATUS_LABEL[r.status] || r.status, tone)}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span></div>
+        <div class="head">${chip(STATUS_LABEL[r.status] || r.status, tone)}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span><span class="spacer"></span>${killBtn}</div>
         <div class="muted small">session ${esc(r.session)} · $${Number(r.usd || 0).toFixed(3)}${r.built.length ? ` · built ${r.built.map(esc).join(", ")}` : ""}${r.reused.length ? ` · reused ${r.reused.map(esc).join(", ")}` : ""}</div>
         ${r.answer ? `<div class="answer">${esc(r.answer)}</div>` : ""}
       </summary>
@@ -173,6 +174,32 @@ function renderRuns() {
     else S.openRuns.delete(el.dataset.run);
     if (el.open && !el.querySelector(".run-log")) el.insertAdjacentHTML("beforeend", renderRunLog(el.dataset.run));
   }));
+  $("runs").querySelectorAll(".run-kill").forEach((b) => b.addEventListener("click", onRunKillClick));
+}
+
+// Same arm-then-confirm pattern as the global Kill switch, scoped to one button — a stray click
+// can't kill a run, but it also doesn't need a native confirm() dialog to be safe.
+async function onRunKillClick(ev) {
+  ev.preventDefault();
+  ev.stopPropagation(); // inside <summary>: don't also toggle the details open/closed
+  const b = ev.currentTarget;
+  if (!b.dataset.armed) {
+    b.dataset.armed = "1";
+    b.textContent = "Click again to confirm";
+    setTimeout(() => { delete b.dataset.armed; b.textContent = "Kill this run"; }, 4000);
+    return;
+  }
+  delete b.dataset.armed;
+  b.disabled = true;
+  b.textContent = "Killing…";
+  try {
+    await j(`/api/runs/${encodeURIComponent(b.dataset.run)}/kill`, { method: "POST" });
+    refreshSummarySoon();
+  } catch (e) {
+    banner("bad", `Kill failed: ${e.message}`);
+    b.disabled = false;
+    b.textContent = "Kill this run";
+  }
 }
 
 // ---- registry -------------------------------------------------------------------------------

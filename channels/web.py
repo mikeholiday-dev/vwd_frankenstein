@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import uuid
 from pathlib import Path
 
@@ -194,6 +196,61 @@ def approve(request_id: str, d: Decision):
 def kill():
     events.emit(EventType.KILL, by="operator")
     return {"ok": True}
+
+
+KILL_POLL_S = 0.25
+KILL_GRACE_POLLS = 20  # ~5s at the default poll interval before escalating to SIGKILL
+
+
+@app.post("/api/runs/{run_id}/kill")
+async def kill_run(run_id: str):
+    """Kill just this run, not every run in progress — the harness's own kill event has no
+    run scoping (every process's Budget.check() polls the same log, so EventType.KILL always
+    stops all of them; that's the global Kill switch). This works a different way: every
+    run_started event already records its process's pid, so send that process a real signal
+    directly, then write the RUN_FINISHED a self-reported kill would have written, once the
+    process is confirmed gone — the harness itself is never told, it just stops running."""
+    all_events = events.read_from(0)[0]
+    started = next((e for e in all_events if e.run_id == run_id and e.type == EventType.RUN_STARTED), None)
+    if started is None:
+        raise HTTPException(404, f"no such run: {run_id}")
+    if any(e.run_id == run_id and e.type == EventType.RUN_FINISHED for e in all_events):
+        raise HTTPException(409, f"run {run_id} already finished")
+    pid = started.data.get("pid")
+    if not pid:
+        raise HTTPException(409, "this run has no recorded pid (an older log, or started a different way)")
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        raise HTTPException(409, "that process is already gone") from None
+    t = asyncio.create_task(_confirm_kill(run_id, pid))
+    _background_tasks.add(t)
+    t.add_done_callback(_background_tasks.discard)
+    return {"ok": True}
+
+
+def _process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # exists, owned by someone else — treat as alive, nothing more we can do
+        return True
+    return True
+
+
+async def _confirm_kill(run_id: str, pid: int) -> None:
+    for _ in range(KILL_GRACE_POLLS):
+        await asyncio.sleep(KILL_POLL_S)
+        if not _process_alive(pid):
+            break
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await asyncio.sleep(KILL_POLL_S)
+    EventLog(events.path, session="web", run_id=run_id).emit(EventType.RUN_FINISHED, status="killed")
 
 
 # ---- registry --------------------------------------------------------------------------------

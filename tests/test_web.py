@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -88,6 +89,100 @@ def test_decision_and_kill_go_through_the_log(dashboard, events):
     assert decided.type == EventType.APPROVAL_DECIDED
     assert decided.data == {"request_id": "req-1", "approved": False, "by": "operator", "reason": "too many domains"}
     assert kill.type == EventType.KILL and kill.data["by"] == "operator"
+
+
+# ---- killing one run (not the global switch): a real signal to a real process -----------------
+
+
+@pytest.fixture
+def running_process():
+    """A real, harmless child process to signal — never a mock, so the SIGTERM/SIGKILL path is
+    genuinely exercised, not just assumed to work."""
+    proc = subprocess.Popen(["sleep", "30"])
+    yield proc
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+
+
+def _run_started(log: EventLog, run_id: str, pid: int | None, **extra) -> None:
+    EventLog(log.path, session="test", run_id=run_id).emit(EventType.RUN_STARTED, task="t", **({"pid": pid} if pid is not None else {}), **extra)
+
+
+@pytest.mark.asyncio
+async def test_kill_run_signals_the_real_process_and_marks_it_killed(dashboard, events, running_process, monkeypatch):
+    w, _, _ = dashboard
+    monkeypatch.setattr(w, "KILL_POLL_S", 0.01)
+    _run_started(events, "run-1", running_process.pid)
+
+    result = await w.kill_run("run-1")
+    assert result == {"ok": True}
+    [t] = [t for t in w._background_tasks]
+    await t
+
+    running_process.wait(timeout=2)
+    assert running_process.returncode is not None  # the real process actually exited
+
+    finished = next(e for e in events.read_from(0)[0] if e.type == EventType.RUN_FINISHED)
+    assert finished.run_id == "run-1"  # attributed to the killed run, not web's own synthetic one
+    assert finished.data["status"] == "killed"
+
+
+@pytest.mark.asyncio
+async def test_kill_run_escalates_to_sigkill_if_sigterm_is_ignored(dashboard, events, monkeypatch):
+    w, _, _ = dashboard
+    monkeypatch.setattr(w, "KILL_POLL_S", 0.01)
+    monkeypatch.setattr(w, "KILL_GRACE_POLLS", 3)
+    proc = subprocess.Popen(["python3", "-c", "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"])
+    try:
+        _run_started(events, "run-2", proc.pid)
+        await w.kill_run("run-2")
+        [t] = [t for t in w._background_tasks]
+        await t
+        proc.wait(timeout=2)
+        assert proc.returncode is not None
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+@pytest.mark.asyncio
+async def test_kill_run_404_for_an_unknown_run(dashboard):
+    w, _, _ = dashboard
+    with pytest.raises(HTTPException) as err:
+        await w.kill_run("no-such-run")
+    assert err.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_kill_run_409_if_already_finished(dashboard, events):
+    w, _, _ = dashboard
+    _run_started(events, "run-3", 12345)
+    EventLog(events.path, session="test", run_id="run-3").emit(EventType.RUN_FINISHED, status="ok")
+    with pytest.raises(HTTPException) as err:
+        await w.kill_run("run-3")
+    assert err.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_kill_run_409_with_no_recorded_pid(dashboard, events):
+    w, _, _ = dashboard
+    _run_started(events, "run-4", None)
+    with pytest.raises(HTTPException) as err:
+        await w.kill_run("run-4")
+    assert err.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_kill_run_409_if_the_process_is_already_gone(dashboard, events):
+    w, _, _ = dashboard
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    _run_started(events, "run-5", proc.pid)
+    with pytest.raises(HTTPException) as err:
+        await w.kill_run("run-5")
+    assert err.value.status_code == 409
 
 
 def _install_v1_and_v2(registry, tmp_path) -> Manifest:
