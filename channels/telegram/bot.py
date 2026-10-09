@@ -5,7 +5,10 @@ on CREDENTIALS_PORT, sharing one CredentialStore. A text or voice message become
 one channels.runner.run_task() call; progress is relayed into the chat as
 it happens, approvals can be decided from an inline keyboard here or from the web
 dashboard (both just write to the same event log), and the final answer is spoken
-back through ElevenLabs when a key is available.
+back through ElevenLabs when a key is available. A sent document is saved and attached
+to the next task in that chat — immediately, if sent with a caption (the caption becomes
+the task), or buffered until a text message follows — the same `attach` a terminal's
+`frank run --attach FILE` or the dashboard's upload form would give a run.
 
   uv run python -m channels.telegram.bot    # needs FRANK_TELEGRAM_KEY or a token entered on the dashboard
 """
@@ -15,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from pathlib import Path
 
 import uvicorn
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -30,6 +34,7 @@ from harness.ops.events import EventLog
 
 CREDENTIALS_PORT = int(os.environ.get("FRANK_CREDENTIALS_PORT", "8001"))
 MAX_MESSAGE_CHARS = 3500  # Telegram's limit is 4096; leave room for formatting
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # matches channels/web.py's New task upload cap
 
 
 def truncate(text: str, limit: int = MAX_MESSAGE_CHARS) -> str:
@@ -41,9 +46,10 @@ def truncate(text: str, limit: int = MAX_MESSAGE_CHARS) -> str:
 
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Send me a task (text or voice) and I'll run it through Frankenstein. "
-        "/quality cheap|full picks the model tier (cheap by default). /kill stops whatever's running "
-        "right now, everywhere, not just in this chat."
+        "Send me a task (text or voice) and I'll run it through Frankenstein. Attach a file and I'll "
+        "pass it along as an input — send it with a caption to run right away, or send it alone and "
+        "then your task text. /quality cheap|full picks the model tier (cheap by default). /kill stops "
+        "whatever's running right now, everywhere, not just in this chat."
     )
 
 
@@ -63,6 +69,34 @@ async def on_kill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await handle_task(update, context, update.message.text)
+
+
+def _save_attachment(chat_id: int, filename: str, data: bytes) -> Path:
+    """Writes an uploaded document under work/uploads/telegram-<chat_id>/, named by basename
+    only so a filename can never write outside that folder — the Telegram-side equivalent of
+    channels/web.py's own upload handling for the dashboard's New task form."""
+    dest_dir = config.WORK_DIR / "uploads" / f"telegram-{chat_id}"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / Path(filename).name
+    dest.write_bytes(data)
+    return dest
+
+
+async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    doc = update.message.document
+    name = doc.file_name or doc.file_id
+    if doc.file_size and doc.file_size > MAX_UPLOAD_BYTES:
+        await update.message.reply_text(f"{name}: larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
+        return
+    file = await context.bot.get_file(doc.file_id)
+    data = bytes(await file.download_as_bytearray())
+    path = _save_attachment(update.effective_chat.id, name, data)
+    context.chat_data.setdefault("pending_attachments", []).append(path)
+    caption = (update.message.caption or "").strip()
+    if caption:
+        await handle_task(update, context, caption)
+    else:
+        await update.message.reply_text(f"Attached {path.name}. Send your task text (or more files) and I'll include it.")
 
 
 async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -90,13 +124,14 @@ async def handle_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task: 
         await update.message.reply_text("Still working on your last task in this chat — wait for it to finish, or /kill.")
         return
     chat_data["busy"] = True
+    attach = chat_data.pop("pending_attachments", [])
     session = f"telegram-{update.effective_chat.id}-{uuid.uuid4().hex[:8]}"
     status_msg = await update.message.reply_text("Starting…")
     lines: list[str] = []
     answer_text: str | None = None
     secrets = offered_secrets(context.bot_data["store"])
     try:
-        async for upd in runner.run_task(task, session=session, models=quality_for(chat_data), secrets=secrets):
+        async for upd in runner.run_task(task, session=session, models=quality_for(chat_data), secrets=secrets, attach=attach):
             if upd.kind == "approval_requested":
                 await _ask_approval(update, upd)
                 continue
@@ -152,6 +187,7 @@ def build_app(token: str, store: CredentialStore) -> Application:
     application.add_handler(CommandHandler("quality", on_quality))
     application.add_handler(CommandHandler("kill", on_kill))
     application.add_handler(MessageHandler(filters.VOICE, on_voice))
+    application.add_handler(MessageHandler(filters.Document.ALL, on_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     application.add_handler(CallbackQueryHandler(on_approval_callback))
     return application

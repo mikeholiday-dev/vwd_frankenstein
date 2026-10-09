@@ -18,9 +18,11 @@ from channels.telegram import bot
 
 
 class FakeMessage:
-    def __init__(self, text: str = "", voice=None):
+    def __init__(self, text: str = "", voice=None, document=None, caption: str = ""):
         self.text = text
         self.voice = voice
+        self.document = document
+        self.caption = caption
         self.sent: list[tuple] = []
         self.edits: list[str] = []
 
@@ -33,6 +35,29 @@ class FakeMessage:
 
     async def edit_text(self, text):
         self.edits.append(text)
+
+
+class FakeDocument:
+    def __init__(self, file_id: str = "doc-1", file_name: str = "invoice.pdf", file_size: int = 10):
+        self.file_id = file_id
+        self.file_name = file_name
+        self.file_size = file_size
+
+
+class FakeTgFile:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    async def download_as_bytearray(self):
+        return bytearray(self._data)
+
+
+class FakeBot:
+    def __init__(self, data: bytes = b"%PDF-1.4 fake"):
+        self._data = data
+
+    async def get_file(self, file_id):
+        return FakeTgFile(self._data)
 
 
 class FakeQuery:
@@ -49,8 +74,8 @@ class FakeQuery:
         self.edited.append(text)
 
 
-def make_update(text: str = "task", username: str = "alice", chat_id: int = 1):
-    message = FakeMessage(text=text)
+def make_update(text: str = "task", username: str = "alice", chat_id: int = 1, document=None, caption: str = ""):
+    message = FakeMessage(text=text, document=document, caption=caption)
     return SimpleNamespace(
         message=message,
         effective_chat=SimpleNamespace(id=chat_id),
@@ -59,8 +84,10 @@ def make_update(text: str = "task", username: str = "alice", chat_id: int = 1):
     )
 
 
-def make_context(chat_data=None, store=None, args=None):
-    return SimpleNamespace(chat_data=chat_data if chat_data is not None else {}, bot_data={"store": store or CredentialStore()}, args=args or [])
+def make_context(chat_data=None, store=None, args=None, bot=None):
+    return SimpleNamespace(
+        chat_data=chat_data if chat_data is not None else {}, bot_data={"store": store or CredentialStore()}, args=args or [], bot=bot or FakeBot()
+    )
 
 
 # ---- pure helpers: see tests/test_chat.py for quality_for/is_busy/approval_callback_data/parse_approval_callback -------
@@ -99,7 +126,7 @@ async def test_quality_command_with_no_args_reports_current():
 
 @pytest.mark.asyncio
 async def test_handle_task_streams_progress_then_sends_the_answer(monkeypatch):
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
         yield Progress("gap", "building a thing")
         yield Progress("install", "installed x@v1")
         yield Progress("answer", "the final answer")
@@ -120,7 +147,7 @@ async def test_handle_task_streams_progress_then_sends_the_answer(monkeypatch):
 async def test_handle_task_passes_the_stores_secrets_to_run_task(monkeypatch):
     captured = {}
 
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
         captured["secrets"] = secrets
         yield Progress("finished", "ok")
 
@@ -143,7 +170,7 @@ async def test_handle_task_refuses_a_second_task_while_busy():
 
 @pytest.mark.asyncio
 async def test_handle_task_clears_busy_even_if_run_task_raises(monkeypatch):
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
         yield Progress("gap", "building")
         raise RuntimeError("boom")
 
@@ -159,7 +186,7 @@ async def test_handle_task_clears_busy_even_if_run_task_raises(monkeypatch):
 async def test_handle_task_posts_an_approval_keyboard(monkeypatch):
     approval = {"id": "req-1", "ref": "x@v1", "manifest": {}, "previous": None, "permissions_diff": {}, "test_report": {}, "code": ""}
 
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
         yield Progress("approval_requested", "Needs your approval: x@v1", approval=approval)
         yield Progress("finished", "ok")
 
@@ -177,7 +204,7 @@ async def test_handle_task_posts_an_approval_keyboard(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_task_skips_voice_reply_without_a_key(monkeypatch):
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
         yield Progress("answer", "spoken answer")
         yield Progress("finished", "ok")
 
@@ -190,7 +217,7 @@ async def test_handle_task_skips_voice_reply_without_a_key(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_task_sends_voice_when_a_key_is_present(monkeypatch):
-    async def fake_run_task(task, *, session, models, secrets=None):
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
         yield Progress("answer", "spoken answer")
         yield Progress("finished", "ok")
 
@@ -202,6 +229,76 @@ async def test_handle_task_sends_voice_when_a_key_is_present(monkeypatch):
     context = make_context(store=store)
     await bot.handle_task(update, context, "x")
     assert any(s[0] == "<voice>" and s[1] == b"audio-bytes" for s in update.message.sent)
+
+
+# ---- document upload ---------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_document_without_caption_is_buffered_not_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot.config, "WORK_DIR", tmp_path / "work")
+    update = make_update(document=FakeDocument())
+    context = make_context()
+    await bot.on_document(update, context)
+
+    assert context.chat_data["pending_attachments"][0].name == "invoice.pdf"
+    assert "attached" in update.message.sent[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_document_with_caption_runs_immediately_with_the_attachment(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot.config, "WORK_DIR", tmp_path / "work")
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
+        captured["task"] = task
+        captured["attach"] = list(attach)
+        yield Progress("finished", "ok")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    update = make_update(document=FakeDocument(), caption="check this invoice")
+    context = make_context()
+    await bot.on_document(update, context)
+
+    assert captured["task"] == "check this invoice"
+    assert captured["attach"][0].name == "invoice.pdf"
+    assert "pending_attachments" not in context.chat_data  # consumed by handle_task
+
+
+@pytest.mark.asyncio
+async def test_a_buffered_attachment_is_included_when_text_follows(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot.config, "WORK_DIR", tmp_path / "work")
+    captured = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
+        captured["attach"] = list(attach)
+        yield Progress("finished", "ok")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    context = make_context()
+    await bot.on_document(make_update(document=FakeDocument()), context)
+    await bot.on_text(make_update(text="check this invoice"), context)
+
+    assert captured["attach"][0].name == "invoice.pdf"
+    assert "pending_attachments" not in context.chat_data  # consumed, not left for the next task
+
+
+@pytest.mark.asyncio
+async def test_document_over_the_size_cap_is_rejected(monkeypatch):
+    update = make_update(document=FakeDocument(file_size=bot.MAX_UPLOAD_BYTES + 1))
+    context = make_context()
+    await bot.on_document(update, context)
+
+    assert "larger than" in update.message.sent[0][0]
+    assert "pending_attachments" not in context.chat_data
+
+
+@pytest.mark.asyncio
+async def test_saved_attachment_writes_only_the_basename(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot.config, "WORK_DIR", tmp_path / "work")
+    path = bot._save_attachment(1, "../../etc/passwd", b"x")
+    assert path.name == "passwd"
+    assert path.parent == tmp_path / "work" / "uploads" / "telegram-1"
 
 
 # ---- approval callback --------------------------------------------------------------------
