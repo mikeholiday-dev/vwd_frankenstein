@@ -335,6 +335,16 @@ async def test_new_task_rejects_an_unknown_model_tier(dashboard):
 
 
 @pytest.mark.asyncio
+async def test_new_task_refuses_cheap_models_in_demo_mode(dashboard, monkeypatch):
+    w, _, _ = dashboard
+    monkeypatch.setattr(config, "MODE", "demo")
+    with pytest.raises(HTTPException) as err:
+        await w.new_task(task="x", models="cheap", files=[])
+    assert err.value.status_code == 400
+    assert not w._background_tasks
+
+
+@pytest.mark.asyncio
 async def test_new_task_defaults_to_the_cheap_tier(dashboard, monkeypatch):
     w, _, _ = dashboard
     captured = {}

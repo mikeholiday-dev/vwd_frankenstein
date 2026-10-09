@@ -150,6 +150,8 @@ async def new_task(task: str = Form(...), models: str = Form("cheap"), files: li
         raise HTTPException(400, "task is empty")
     if models not in ("cheap", "full"):
         raise HTTPException(400, "models must be 'cheap' or 'full'")
+    if config.MODE == "demo" and models == "cheap":  # the subprocess would refuse it at import and never start
+        raise HTTPException(400, "demo mode runs only on full models")
     session = f"web-{uuid.uuid4().hex[:8]}"
     attach = await _save_uploads(session, files)
     t = asyncio.create_task(_drain(session, task, models, attach))
