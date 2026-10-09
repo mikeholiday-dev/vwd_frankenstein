@@ -224,12 +224,16 @@ function renderHeader() {
     const answer = a ? `<div class="answer${unverified ? " unverified" : ""}"><div>${esc(a.text)}</div>
       <div class="muted">Cites ${a.call_ids?.length ? tags(a.call_ids) : "no calls"}${a.provenance ? " " + chip(unverified ? "provenance: " + a.provenance : "provenance checked", unverified ? "bad" : "ok") : ""}</div>
       ${a.reused?.length ? `<div class="muted">Reused ${tags(a.reused)}</div>` : ""}${a.built?.length ? `<div class="muted">Built ${tags(a.built, "add")}</div>` : ""}</div>` : "";
+    const waiting = r.status === "running"
+      ? `<div class="answer pending"><span class="spinner" aria-hidden="true"></span>Working on it…</div>`
+      : `<div class="answer none">No answer (${esc(STATUS_LABEL[r.status] || r.status)}).</div>`;
     $("task").className = "";
-    $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>`
-      + `<div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}${r.attached?.length ? `<div class="muted">Attached: ${tags(r.attached)}</div>` : ""}`
+    $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>` + (answer || waiting)
+      + `<div class="meta"><div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}`
+      + (r.attached?.length ? `<div class="muted">Attached: ${tags(r.attached)}</div>` : "")
       + (r.secrets?.length ? `<div class="muted">Credentials offered: ${tags(r.secrets)}</div>` : "")
       + (r.models ? `<div class="muted">Models: ${ioTable(r.models)}</div>` : "")
-      + (r.plan ? `<div class="plan"><span class="muted">Plan:</span> ${esc(r.plan)}</div>` : "") + answer;
+      + (r.plan ? `<div class="plan"><span class="muted">Plan:</span> ${esc(r.plan)}</div>` : "") + `</div>`;
   }
   renderMeters(r);
 }

@@ -1,10 +1,11 @@
 <!doctype html>
-<!-- Owner: D. The one operator page (plan §6): start a task, approve installs from the full card
-     (manifest, permissions diff, harness test log, code) in a modal that blocks the page until decided, watch the selected run's lab, budget
-     and timeline, roll back or quarantine from the registry, kill one run or all of them, and
-     enter channel credentials. Everything is derived from the shared event log (/api/events)
-     plus /api/summary, /api/registry and /api/config. One file per concern (dashboard.css,
-     dashboard.js), no build step, served by channels/web.py. -->
+<!-- Owner: D. The one operator page (plan §6). Input and output lead: the selected run's output on the right,
+     the task input under it, every statistic in a sidebar on the left. Start a task, approve installs from the full
+     card (manifest, permissions diff, harness test log, code) in a modal that blocks the page until decided, watch
+     the selected run's lab, budget and timeline, roll back or quarantine from the registry, kill one run or all of
+     them, and enter channel credentials. Everything is derived from the shared event log (/api/events) plus
+     /api/summary, /api/registry and /api/config. One file per concern (dashboard.css, dashboard.js), no build step,
+     served by channels/web.py. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -26,99 +27,96 @@
 
 <div id="banners" class="banners" hidden></div>
 
-<main class="wrap">
+<main class="app">
 
-  <section class="tiles" id="tiles" aria-label="Overview"></section>
+  <aside class="side" aria-label="Statistics">
 
-  <section class="cols">
+    <section class="tiles" id="tiles" aria-label="Overview"></section>
+
+    <section class="card">
+      <h2>Budget <span id="caps" class="muted" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div id="meters" class="meters"></div>
+    </section>
+
     <div class="card">
       <h2>Runs by status</h2>
       <div id="statusChart" class="status-chart"></div>
     </div>
+
     <div class="card">
       <h2>Spend per run <span class="muted">(API-equivalent)</span></h2>
       <div id="spendChart" class="spend-chart"></div>
     </div>
-  </section>
 
-  <section class="card" id="run">
-    <h2>Run</h2>
-    <div id="runBanners" class="run-banners" hidden></div>
-    <div id="task" class="muted">No run yet. Start one below, with <span class="mono">frank run</span>, from a chat bot, or with <span class="mono">scripts/fake_run.py</span>.</div>
-  </section>
+    <details class="card fold" id="labSection" open>
+      <summary><h2><span class="chev" aria-hidden="true"></span>Lab <span id="labCount" class="count">0</span><span id="labNew" class="chip info new-badge" hidden></span>
+        <span class="spacer"></span><span class="toggle-hint" data-show="Show" data-hide="Hide" aria-hidden="true"></span></h2></summary>
+      <div id="lab" class="muted">Gaps, builds and test runs of the selected run appear here.</div>
+    </details>
 
-  <section class="card">
-    <h2>Budget <span id="caps" class="muted" style="text-transform:none;letter-spacing:0"></span></h2>
-    <div id="meters" class="meters"></div>
-  </section>
-
-  <section class="cols cols-wide">
-    <div class="stack">
-
-      <details class="card fold" id="labSection" open>
-        <summary><h2><span class="chev" aria-hidden="true"></span>Lab <span id="labCount" class="count">0</span><span id="labNew" class="chip info new-badge" hidden></span>
-          <span class="spacer"></span><span class="toggle-hint" data-show="Show" data-hide="Hide" aria-hidden="true"></span></h2></summary>
-        <div id="lab" class="muted">Gaps, builds and test runs of the selected run appear here.</div>
-      </details>
-
-      <div class="card">
-        <h2>Outputs <span id="runsCount" class="count">0</span></h2>
-        <div id="runs" class="muted">No runs yet.</div>
-      </div>
-
-      <div class="card">
-        <h2>Timeline <span id="evCount" class="count">0</span></h2>
-        <div id="timeline" class="timeline"></div>
-      </div>
-
+    <div class="card">
+      <h2>Timeline <span id="evCount" class="count">0</span></h2>
+      <div id="timeline" class="timeline"></div>
     </div>
 
-    <div class="stack">
-
-      <div class="card">
-        <h2>Registry <span id="regCount" class="count">0</span></h2>
-        <div id="registry"></div>
-      </div>
-
-      <div class="card">
-        <h2>Registry history <span id="logCount" class="count">0</span></h2>
-        <div id="reglog"></div>
-      </div>
-
-      <div class="card">
-        <h2>Credentials</h2>
-        <p class="muted small">Used only for this process, unless you tick "remember" — a key is never sent anywhere but the service itself, never written into the repo.</p>
-        <div id="creds"></div>
-      </div>
-
+    <div class="card">
+      <h2>Registry <span id="regCount" class="count">0</span></h2>
+      <div id="registry"></div>
     </div>
+
+    <div class="card">
+      <h2>Registry history <span id="logCount" class="count">0</span></h2>
+      <div id="reglog"></div>
+    </div>
+
+    <div class="card">
+      <h2>Credentials</h2>
+      <p class="muted small">Used only for this process, unless you tick "remember" — a key is never sent anywhere but the service itself, never written into the repo.</p>
+      <div id="creds"></div>
+    </div>
+
+  </aside>
+
+  <section class="io" aria-label="Output and input">
+
+    <section class="card output" id="run">
+      <h2>Output</h2>
+      <div id="runBanners" class="run-banners" hidden></div>
+      <div id="task" class="muted">No run yet. Start one below, with <span class="mono">frank run</span>, from a chat bot, or with <span class="mono">scripts/fake_run.py</span>.</div>
+    </section>
+
+    <div class="card">
+      <h2>All outputs <span id="runsCount" class="count">0</span></h2>
+      <div id="runs" class="muted">No runs yet.</div>
+    </div>
+
+    <footer class="task-bar" aria-label="New task">
+      <div class="task-bar-inner">
+        <form id="newTask" class="task-form">
+          <textarea id="taskInput" placeholder="e.g. Here's an invoice PDF. Check the supplier, verify the bank account, and tell me the total in EUR." rows="2" required></textarea>
+          <div class="task-form-row">
+            <label class="muted small">Models
+              <select id="taskModels">
+                <option value="cheap" selected>cheap (rehearsal)</option>
+                <option value="full">full</option>
+              </select>
+            </label>
+            <label class="file-pick muted small" title="Or paste (⌘V) or drop files anywhere on the page">
+              <input type="file" id="taskFiles" multiple hidden>
+              <span>Attach files</span>
+            </label>
+            <span id="taskFilesList" class="file-list"></span>
+            <span class="spacer"></span>
+            <span id="taskStatus" class="muted small"></span>
+            <button type="submit" class="ok">Run</button>
+          </div>
+        </form>
+      </div>
+    </footer>
+
   </section>
 
 </main>
-
-<footer class="task-bar" aria-label="New task">
-  <div class="task-bar-inner">
-    <form id="newTask" class="task-form">
-      <textarea id="taskInput" placeholder="e.g. Here's an invoice PDF. Check the supplier, verify the bank account, and tell me the total in EUR." rows="2" required></textarea>
-      <div class="task-form-row">
-        <label class="muted small">Models
-          <select id="taskModels">
-            <option value="cheap" selected>cheap (rehearsal)</option>
-            <option value="full">full</option>
-          </select>
-        </label>
-        <label class="file-pick muted small" title="Or paste (⌘V) or drop files anywhere on the page">
-          <input type="file" id="taskFiles" multiple hidden>
-          <span>Attach files</span>
-        </label>
-        <span id="taskFilesList" class="file-list"></span>
-        <span class="spacer"></span>
-        <span id="taskStatus" class="muted small"></span>
-        <button type="submit" class="ok">Run</button>
-      </div>
-    </form>
-  </div>
-</footer>
 
 <dialog id="approvalModal" class="approval-modal" aria-labelledby="approvalTitle"></dialog>
 
