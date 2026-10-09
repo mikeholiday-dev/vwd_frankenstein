@@ -77,10 +77,11 @@
   <section class="cols cols-wide">
     <div class="stack">
 
-      <div class="card">
-        <h2>Lab <span id="labCount" class="count">0</span></h2>
+      <details class="card fold" id="labSection" open>
+        <summary><h2><span class="chev" aria-hidden="true"></span>Lab <span id="labCount" class="count">0</span><span id="labNew" class="chip info new-badge" hidden></span>
+          <span class="spacer"></span><span class="toggle-hint" data-show="Show" data-hide="Hide" aria-hidden="true"></span></h2></summary>
         <div id="lab" class="muted">Gaps, builds and test runs of the selected run appear here.</div>
-      </div>
+      </details>
 
       <div class="card">
         <h2>Outputs <span id="runsCount" class="count">0</span></h2>

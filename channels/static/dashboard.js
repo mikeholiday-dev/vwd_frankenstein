@@ -39,6 +39,7 @@ const S = {
   lastId: -1,
   killedAt: null,
   open: new Map(),       // <details> the operator opened or closed, by data-key
+  labNew: 0,             // lab activity of the selected run that arrived while the Lab was folded
   openRuns: new Set(),   // expanded rows of the outputs list
   openCreds: new Set(),
   dirty: new Set(["all"]),
@@ -86,6 +87,7 @@ function apply(e) {
       c.state = d.approved ? "approved" : "rejected"; c.tone = d.approved ? "green" : "red";
       r.events.push(e);
       S.dirty.add("lab");
+      labActivity(r, e.type);
     } else S.operator.push(e);
     return;
   }
@@ -158,9 +160,18 @@ function apply(e) {
       refreshSummarySoon();
       break;
   }
+  labActivity(r, e.type);
 }
 
 const current = () => S.runs.get(S.selected ?? S.order[S.order.length - 1]);
+
+// Counts what the folded Lab is hiding, so its header can say something new came in.
+const LAB_TYPES = new Set(["gap", "study", "build", "test_run", "approval_requested", "approval_decided", "install", "call"]);
+function labActivity(r, type) {
+  if (!LAB_TYPES.has(type) || $("labSection").open || r !== current()) return;
+  S.labNew++;
+  S.dirty.add("labBadge");
+}
 
 // ---- small rendering helpers ----------------------------------------------------------------
 
@@ -257,6 +268,7 @@ function renderRunSelect() {
 
 function select(runId) {
   S.selected = runId || null;
+  S.labNew = 0;  // a different run's lab: nothing in it is "new" to the operator
   S.dirty.add("all");
   schedule();
 }
@@ -595,6 +607,7 @@ function schedule() {
     if (has("runs")) renderRunSelect();
     if (has("header")) renderHeader();
     if (has("lab")) renderLab();
+    if (has("labBadge")) { $("labNew").hidden = !S.labNew; $("labNew").textContent = `${S.labNew} new`; }
     if (has("approvals")) renderApprovals();
     if (has("registry")) renderRegistry();
     if (has("reglog")) renderRegistryLog();
@@ -704,6 +717,9 @@ document.addEventListener("toggle", (ev) => {
 }, true);
 
 $("runSelect").addEventListener("change", (ev) => select(ev.target.value));
+$("labSection").addEventListener("toggle", () => {
+  if ($("labSection").open) { S.labNew = 0; $("labNew").hidden = true; }
+});
 $("approvalModal").addEventListener("cancel", (ev) => ev.preventDefault());  // Escape: a decision is required
 
 // ---- new task -----------------------------------------------------------------------------------
