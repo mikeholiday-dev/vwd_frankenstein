@@ -14,7 +14,8 @@
 }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }  /* class display rules (.chip, .banner, ...) must not undo the hidden attribute */
-body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+html { scroll-padding-bottom:140px; }  /* keep scrolled-to items clear of the pinned task bar */
+body { margin:0; min-height:100vh; display:flex; flex-direction:column; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
 header { position:sticky; top:0; z-index:5; background:var(--card); border-bottom:1px solid var(--line); padding:10px 16px; display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; }
 header h1 { font-size:16px; margin:0; }
 .spacer { flex:1; }
@@ -44,7 +45,7 @@ details.more[open] > summary { color:var(--fg); }
 .banner.ok { background:var(--ok-bg); color:var(--ok); } .banner.bad { background:var(--bad-bg); color:var(--bad); } .banner.warn { background:var(--warn-bg); color:var(--warn); }
 .run-banners { margin-bottom:6px; } .run-banners .banner { font-weight:600; border:1px solid currentColor; }
 
-.wrap { max-width:1300px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+.wrap { width:100%; max-width:1300px; margin:0 auto; padding:16px; display:grid; gap:16px; }
 .cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }
 .stack { display:grid; gap:16px; min-width:0; }
 .cols-wide { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); }
@@ -118,12 +119,18 @@ details.more[open] > summary { color:var(--fg); }
 .status-row.warn i { background:var(--warn); } .status-row.info i { background:var(--info); }
 .status-row .n { text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }
 
-/* ---- spend sparkline: one sequential hue, thin stroke, rounded cap, 8px+ markers, SVG <title> = tooltip ---- */
-.spend-chart svg { width:100%; height:120px; overflow:visible; }
+/* ---- spend chart: one sequential hue, recessive grid + axis titles, thinned value labels, thin stroke, rounded cap, 8px+ markers, SVG <title> = tooltip ---- */
+.spend-chart svg { display:block; overflow:visible; }
 .spend-chart .area { fill:var(--info-bg); opacity:.6; }
 .spend-chart .line { fill:none; stroke:var(--info); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .spend-chart .dot { fill:var(--info); }
 .spend-chart .baseline { stroke:var(--line); stroke-width:1; }
+.spend-chart .grid { stroke:var(--soft); stroke-width:1; }
+.spend-chart .hit { fill:transparent; }
+.spend-chart g:hover .dot { r:5; }
+.spend-chart .tick { fill:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
+.spend-chart .val { fill:var(--fg); font-size:10px; font-variant-numeric:tabular-nums; paint-order:stroke; stroke:var(--card); stroke-width:3px; stroke-linejoin:round; }
+.spend-chart .axis-title { fill:var(--muted); font-size:11px; }
 .spend-chart .empty { color:var(--muted); font-size:13px; padding:30px 0; text-align:center; }
 
 /* ---- outputs / recent runs ---- */
@@ -199,8 +206,11 @@ tr.quarantined .name { text-decoration:line-through; color:var(--muted); }
 .cred-form input[type=password] { flex:1; min-width:140px; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:6px 8px; color:var(--fg); font:12px var(--mono); }
 .cred-form label { display:flex; gap:5px; align-items:center; font-size:12px; color:var(--muted); white-space:nowrap; }
 
-/* ---- new task ---- */
-.task-form textarea { width:100%; background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--fg); font:14px/1.4 inherit; resize:vertical; }
+/* ---- new task: a bar pinned to the bottom of the viewport, so a task can be started from anywhere on the page ---- */
+.task-bar { position:sticky; bottom:0; margin-top:auto; z-index:5; background:var(--card); border-top:1px solid var(--line); box-shadow:0 -6px 20px rgba(0,0,0,.08); padding:10px 16px; }
+.task-bar-inner { max-width:1300px; margin:0 auto; }
+.task-bar .task-form-row { margin-top:8px; }
+.task-form textarea { width:100%; background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--fg); font:14px/1.4 inherit; resize:vertical; max-height:40vh; }
 .task-form-row { display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap:wrap; }
 .task-form-row label { display:flex; gap:6px; align-items:center; }
 .task-form-row select, .reg-table .actions select { background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:5px 8px; color:var(--fg); font-size:12px; }
