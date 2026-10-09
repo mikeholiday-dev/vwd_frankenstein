@@ -13,6 +13,7 @@
   }
 }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }  /* class display rules (.chip, .banner, ...) must not undo the hidden attribute */
 body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
 header { position:sticky; top:0; z-index:5; background:var(--card); border-bottom:1px solid var(--line); padding:10px 16px; display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; }
 header h1 { font-size:16px; margin:0; }
@@ -73,6 +74,17 @@ details.more[open] > summary { color:var(--fg); }
 .steps li.pass::before { background:var(--ok); } .steps li.fail::before { background:var(--bad); } .steps li.wait::before { background:var(--warn); }
 .kv { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:3px 12px; margin:8px 0; font-size:13px; }
 .kv dt { color:var(--muted); } .kv dd { margin:0; min-width:0; }
+
+/* ---- a foldable card (the Lab): the header is the toggle, a badge counts what came in while folded ---- */
+.fold > summary { list-style:none; cursor:pointer; }
+.fold > summary::-webkit-details-marker { display:none; }
+.fold > summary h2 { margin:0; }
+.fold[open] > summary h2 { margin-bottom:10px; }
+.fold > summary:focus-visible { outline:2px solid var(--info); outline-offset:4px; border-radius:4px; }
+.new-badge { text-transform:none; letter-spacing:0; font-weight:600; }
+.new-badge::before { content:""; width:7px; height:7px; margin-right:6px; border-radius:50%; background:currentColor; animation:pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity:.25; } }
+@media (prefers-reduced-motion: reduce) { .new-badge::before { animation:none; } }
 
 /* ---- timeline of the selected run plus operator actions ---- */
 .timeline .ev { display:grid; grid-template-columns:62px 150px minmax(0,1fr); gap:8px; padding:4px 0; border-top:1px solid var(--line); font-size:13px; }
