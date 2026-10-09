@@ -45,11 +45,19 @@ details.more[open] > summary { color:var(--fg); }
 .banner.ok { background:var(--ok-bg); color:var(--ok); } .banner.bad { background:var(--bad-bg); color:var(--bad); } .banner.warn { background:var(--warn-bg); color:var(--warn); }
 .run-banners { margin-bottom:6px; } .run-banners .banner { font-weight:600; border:1px solid currentColor; }
 
-.wrap { width:100%; max-width:1300px; margin:0 auto; padding:16px; display:grid; gap:16px; }
-.cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }
-.stack { display:grid; gap:16px; min-width:0; }
-.cols-wide { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); }
-@media (max-width:860px) { .cols, .cols-wide { grid-template-columns:1fr; } }
+/* ---- layout: statistics in a sidebar on the left, output on the right with the task input pinned under it.
+   Each column scrolls on its own; below 1000px it falls back to one page with output and input first. ---- */
+.app { flex:1; min-height:0; display:grid; grid-template-columns:minmax(340px,2fr) minmax(0,3fr); }
+.side, .io { min-width:0; overflow:auto; padding:16px; }
+.side { display:grid; gap:16px; align-content:start; border-right:1px solid var(--line); }
+.io { display:flex; flex-direction:column; gap:16px; padding-bottom:0; }
+body:has(.app) { height:100vh; }
+@media (max-width:1000px) {
+  body:has(.app) { height:auto; }
+  .app { display:flex; flex-direction:column; }
+  .side, .io { overflow:visible; }
+  .side { order:1; border-right:0; padding-top:0; }
+}
 
 .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; min-width:0; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; display:flex; gap:8px; align-items:center; }
@@ -57,10 +65,17 @@ details.more[open] > summary { color:var(--fg); }
 
 /* ---- the selected run: task, plan, answer with its provenance check ---- */
 #run { scroll-margin-top:64px; }
-#task .task { font-size:15px; font-weight:600; margin-bottom:6px; }
+.output { border-color:var(--muted); }
+#task .task { font-size:18px; font-weight:650; line-height:1.35; margin-bottom:4px; }
+#task .meta { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:13px; }
 #task .plan { margin-top:6px; }
 .answer { margin-top:10px; border-left:3px solid var(--ok); padding:2px 0 2px 10px; }
 .answer.unverified { border-color:var(--bad); }
+#task .answer { margin-top:14px; padding:4px 0 4px 14px; font-size:17px; line-height:1.5; }
+#task .answer > div:first-child { white-space:pre-wrap; }
+#task .answer .muted { font-size:13px; margin-top:4px; }
+#task .answer.pending { border-color:var(--info); color:var(--muted); display:flex; align-items:center; font-size:15px; }
+#task .answer.none { border-color:var(--line); color:var(--muted); font-size:15px; }
 
 /* ---- lab: one item per gap / study / capability, a step list per capability ---- */
 .item { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
@@ -206,10 +221,10 @@ tr.quarantined .name { text-decoration:line-through; color:var(--muted); }
 .cred-form input[type=password] { flex:1; min-width:140px; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:6px 8px; color:var(--fg); font:12px var(--mono); }
 .cred-form label { display:flex; gap:5px; align-items:center; font-size:12px; color:var(--muted); white-space:nowrap; }
 
-/* ---- new task: a card floating at the bottom centre of the viewport, so a task can be started from anywhere on the page ---- */
-.task-bar { position:sticky; bottom:0; margin-top:auto; z-index:5; padding:28px 16px 18px; pointer-events:none;
+/* ---- new task: a card floating at the bottom of the output column, so a task can be started from anywhere in it ---- */
+.task-bar { position:sticky; bottom:0; margin:auto -16px 0; z-index:5; padding:28px 16px 18px; pointer-events:none;
   background:linear-gradient(to bottom, transparent, var(--bg) 45%); }  /* floats over the page; content fades out under it */
-.task-bar-inner { max-width:820px; margin:0 auto; pointer-events:auto; background:var(--card); border:1px solid var(--line); border-radius:18px;
+.task-bar-inner { max-width:900px; margin:0 auto; pointer-events:auto; background:var(--card); border:1px solid var(--line); border-radius:18px;
   box-shadow:0 10px 32px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.08); padding:14px 16px 12px; }
 .task-bar-inner:focus-within { border-color:var(--muted); }
 .task-bar .task-form textarea { background:transparent; border:0; border-radius:0; padding:2px 2px 6px; resize:none; outline:none; }
