@@ -5,7 +5,7 @@ Each call is its own subprocess, exactly like an operator typing
 `frank run --session <s> "<task>"` at a terminal: nothing here imports harness.agent
 directly, so it can't drift from what a human running the CLI gets, and a crash in
 one run can't take another one down with it. Installs run with FRANK_APPROVER=ui, so
-a request can be approved from the bot, the dashboard or the console, whichever
+a request can be approved from the bot or the dashboard, whichever
 answers first — all three just call harness.ops.approvals.decide.
 """
 
@@ -90,7 +90,7 @@ async def run_task(task: str, *, session: str, attach: list[Path] = (), models: 
 
 
 def decide_approval(request_id: str, approved: bool, by: str, *, reason: str = "", log_path: Path | None = None) -> None:
-    """What a Telegram Approve/Reject tap calls — the same call the web console makes."""
+    """What a Telegram Approve/Reject tap calls — the same call the dashboard makes."""
     decide(EventLog(log_path or config.LOG_PATH, session="telegram"), request_id, approved, by=by, reason=reason)
 
 

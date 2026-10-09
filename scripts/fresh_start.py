@@ -3,7 +3,7 @@
 Moves the registry, the event log and the build workspaces into
 rehearsals/<timestamp>[-label]/. Never deletes anything: a failed rehearsal is
 evidence too. The next harness command creates a fresh, empty git registry, and
-an open console reloads itself when it sees the new log.
+an open dashboard reloads itself when it sees the new log.
 
   uv run python scripts/fresh_start.py --label take-2
 """

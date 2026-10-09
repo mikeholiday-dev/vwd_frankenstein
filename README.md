@@ -102,9 +102,8 @@ harness/
   kernel/         # A: sandbox, egress proxy, git registry, install gate, capability host, limits.py
   agent/          # B: agent loop, kernel tools, builder/tester prompts
   ops/            # C: JSONL event log, approvals and kill over the log
-ui/               # C: FastAPI + SSE operator console
 scripts/          # C: fake_run.py replays a scripted run for UI work
-channels/         # D: Telegram + Discord bots (text + voice) in front of `frank run`, ElevenLabs voice, a dashboard + credentials page
+channels/         # D: the operator dashboard (FastAPI + SSE, web.py), Telegram + Discord bots (text + voice) in front of `frank run`, ElevenLabs voice
 tests/            # one file per area; kernel tests run against fakes AND real impls
 testdata/         # C: sample invoices and other seeded test data, no code
 registry/         # agent-written capabilities only (own git repo, gitignored here)
@@ -122,9 +121,9 @@ uv run pytest                                     # main stays green
 uv run frank install tests/fixtures/bundles/echo_ok
 uv run frank call echo '{"text":"ahoj"}'
 
-# operator console
-uv run uvicorn ui.app:app --reload                # http://localhost:8000
-uv run python scripts/fake_run.py                 # scripted run, approve it in the UI
+# operator dashboard: new task, lab, approval cards, budget, registry, kill, credentials
+uv run uvicorn channels.web:app --reload --port 8001   # http://localhost:8001
+uv run python scripts/fake_run.py                 # scripted run, approve it on the dashboard
 uv run python scripts/fake_run.py --scenario upgrade   # v2 upgrade with a permissions diff
 uv run python scripts/fake_run.py --scenario capped    # repairs fail until the cap stops the run
 
@@ -138,22 +137,22 @@ uv run python scripts/evidence.py                 # EVIDENCE.md from the event l
 uv run python scripts/package_submission.py       # submission/<timestamp>/: log, evidence, registry bundle; refuses a log with fake events
 
 # channels (D): text or voice in on Telegram and/or Discord, same `frank run` pipeline, voice replies via ElevenLabs
-uv run python -m channels.run                     # both bots + the dashboard (console controls + credentials, :8001) in one process
+uv run python -m channels.run                     # both bots + the dashboard (:8001) in one process
 uv run python -m channels.telegram.bot            # Telegram + the dashboard only
 uv run python -m channels.discord_bot             # Discord + the dashboard only
 ```
 
 `FRANK_MODE=demo` refuses every fake, the auto approver and `FRANK_MODELS=cheap`. Use it for the recorded run.
 
-`FRANK_MODELS=cheap uv run frank run ...` rehearses the plumbing (gate, approvals, events, console) on cheaper models. It says nothing about how well the demo models do.
+`FRANK_MODELS=cheap uv run frank run ...` rehearses the plumbing (gate, approvals, events, dashboard) on cheaper models. It says nothing about how well the demo models do.
 
 ### Rehearsal and the recorded run
 
 ```bash
 uv run python scripts/fresh_start.py --label take-2   # moves registry/, the log and work/ to rehearsals/, never deletes
-uv run uvicorn ui.app:app                             # the open console reloads itself on the new, empty log
+uv run python -m channels.run                         # the open dashboard reloads itself on the new, empty log
 export FRANK_MODE=demo FRANK_APPROVER=ui
-uv run frank registry                                 # empty: the 0–8 s shot (plus the console's Registry history)
+uv run frank registry                                 # empty: the 0–8 s shot (plus the dashboard's Registry history)
 uv run frank run --session A "<task 1>"               # then a new terminal (fresh process) for task 2, then task 3
 ```
 
@@ -172,14 +171,14 @@ Test data for task 2 is in `testdata/` (`invoice_ok.pdf`, `invoice_bad_account.p
 | Install gate | **Real:** the harness runs the tests itself on a throwaway copy; a v2 must also pass the active version's stored tests; bundle-shape refusals before any test run; then the operator approves with the permissions diff |
 | Composition (`uses`) | **Real:** a capability calls installed ones in the same container under the caller's permissions; authority can't grow through it |
 | Agent loop | **Real:** one Agent SDK session per role (planner, builder, tester) over our own tools only; the SDK's built-in Bash, file and web tools and the local install's browser tools are disabled and refused by a hook; no project settings are loaded |
-| Provenance check | **Real:** an answer must cite successful capability calls from this run, otherwise it is flagged `[UNVERIFIED ...]` in the log and the console. "Reused from earlier sessions" in the evidence is computed from the log, not from what the agent says |
+| Provenance check | **Real:** an answer must cite successful capability calls from this run, otherwise it is flagged `[UNVERIFIED ...]` in the log and on the dashboard. "Reused from earlier sessions" in the evidence is computed from the log, not from what the agent says |
 | Input files | **Real:** the operator's files (the invoice PDF) are copied read-only next to every call; test runs don't see them |
 | Sample invoice PDFs, task prompts | Seeded **test data**, not code (`testdata/`, generated by `scripts/make_invoices.py`) |
 | Government APIs | Real live calls in the demo. The agent's own tests may use recorded fixtures for repeatability |
-| `scripts/fake_run.py` | **Simulated:** a scripted event replay for UI work. Every event is marked `fake`, the console shows a banner, and `FRANK_MODE=demo` refuses fakes. Never used for the video |
-| Telegram + Discord bots, dashboard (`channels/`) | **Real:** each chat message spawns an actual `frank run` subprocess (same code path as the CLI and console), tailing the real event log for progress and relaying real approval/kill events. The dashboard (`channels/web.py`) reads and writes the *same* event log and registry as the console — its stat tiles, charts and outputs list are computed from real event data via `scripts.evidence.summarize`, its "New task" form starts a run the same way, and its approve/reject, kill and rollback/quarantine controls are the same calls the console makes. **Verified live** (not just against mocks): ran the project's own canonical demo task through the dashboard's "New task" form and through `frank run` directly against a real Docker sandbox and Claude subscription session, watched it build, test, request approval and answer for real. **Not yet exercised with a live Telegram/Discord/ElevenLabs/Apify account:** no credentials for those four were available while building this, so those calls themselves are unit-tested against mocks (hand-built fakes; discord.py's own `Client`/`ui.View`/`ui.Button` need no network and are exercised directly), not a real bot token. Needs a rehearsal with real keys before it's demo-ready |
+| `scripts/fake_run.py` | **Simulated:** a scripted event replay for UI work. Every event is marked `fake`, the dashboard shows a banner, and `FRANK_MODE=demo` refuses fakes. Never used for the video |
+| Telegram + Discord bots, dashboard (`channels/`) | **Real:** each chat message spawns an actual `frank run` subprocess (same code path as the CLI and the dashboard's "New task" form), tailing the real event log for progress and relaying real approval/kill events. The dashboard (`channels/web.py`) is the one operator page: it reads and writes the shared event log and registry — its lab, approval cards and timeline are derived from the real events, its stat tiles, charts and outputs list are computed via `scripts.evidence.summarize`, and its approve/reject, kill and rollback/quarantine controls write the same events the bots and the CLI approver do. **Verified live** (not just against mocks): ran the project's own canonical demo task through the dashboard's "New task" form and through `frank run` directly against a real Docker sandbox and Claude subscription session, watched it build, test, request approval and answer for real. **Not yet exercised with a live Telegram/Discord/ElevenLabs/Apify account:** no credentials for those four were available while building this, so those calls themselves are unit-tested against mocks (hand-built fakes; discord.py's own `Client`/`ui.View`/`ui.Button` need no network and are exercised directly), not a real bot token. Needs a rehearsal with real keys before it's demo-ready |
 | Speed | Waiting is sped up in the video and labelled |
 | Model access | The demo runs on a Claude subscription through the Agent SDK, not an API key. `$` figures are API-equivalent estimates from token usage |
 | Not yet verified | A full real build, test and install run has not been exercised in the cloud dev container (no Docker daemon there). It needs a rehearsal on a machine with Docker before the recorded run |
-| Missing | Prompt-skill installs (cut, plan §9). The agent can't yet propose a rollback itself; the operator rolls back from the console |
+| Missing | Prompt-skill installs (cut, plan §9). The agent can't yet propose a rollback itself; the operator rolls back from the dashboard |
 | Known limits | Quarantine doesn't cut a call already in flight (≤ 60 s). Dependencies need PyPI reachable. `study` can technically read data (mitigated by the provenance check) and follows redirects without re-checking the target address. Capabilities installed mid-session are called through `invoke_capability`. Text matching in `find_capability` is basic. The approval gate is one operator |

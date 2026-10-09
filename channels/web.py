@@ -1,15 +1,15 @@
-"""The web dashboard. Owner: D.
+"""The web dashboard: the operator's one page (plan §6). Owner: D.
 
-A separate surface from the operator console (ui/), not a replacement for it: both
-read and write the same shared event log and registry (harness/ops/events.py,
-harness/wiring.py), so a run or a decision made on one shows up on the other.
-This one adds the credentials page and leans toward "configure it, see the
-outputs" over the console's deeper build-by-build lab view. `store` and `events`
-are module-level singletons so the bot process can run this alongside the
-Telegram bot and share state; tests monkeypatch them the same way
-tests/test_console.py does for ui/app.py.
+Reads the shared event log, writes operator decisions back into it, and never imports the
+agent. Start a task, approve or reject installs from the full card (manifest, permissions
+diff, the harness's own test log, code), watch the lab and budget of a run, roll back or
+quarantine a capability, kill one run or all of them, enter channel credentials. A run
+started anywhere else (`frank run` with FRANK_APPROVER=ui, a chat bot) shows up here too and
+blocks on the approval card. `store` and `events` are module-level singletons so the bot
+process can run this alongside the bots and share state; tests monkeypatch them.
 
-  uv run uvicorn channels.web:app --port 8001   # standalone, for UI work on this page alone
+  uv run uvicorn channels.web:app --reload --port 8001   # standalone
+  uv run python -m channels.run                          # with the Telegram and Discord bots
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -64,7 +65,7 @@ class Reset(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC / "dashboard.html").read_text()
+    return HTMLResponse((STATIC / "dashboard.html").read_text(), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/dashboard.css")
@@ -82,17 +83,17 @@ def js():
 
 @app.get("/api/config")
 def api_config():
+    """What the page shows before any run: the caps and which parts are fakes."""
     return {"limits": LIMITS, "mode": config.MODE, "fakes": sorted(config.FAKES), "approver": config.APPROVER, "auth": config.AUTH, "models": config.MODELS}
 
 
 @app.get("/api/events")
 async def stream(request: Request, offset: int = 0):
-    """SSE: every event from `offset` (0 = replay the whole log), then live. Same shape ui/app.py
-    serves, so a client could point either console's event feed at either server."""
+    """SSE: every event from `offset` (0 = replay the whole log), then live."""
     async def gen():
         pos = offset
         while not await request.is_disconnected():
-            if (events.path.stat().st_size if events.path.exists() else 0) < pos:
+            if (events.path.stat().st_size if events.path.exists() else 0) < pos:  # moved aside by scripts/fresh_start.py
                 yield "event: reset\ndata: {}\n\n"
                 return
             new, pos = events.read_from(pos)
@@ -261,6 +262,19 @@ def registry():
     return [to_jsonable(e) for e in make_registry().list(include_quarantined=True)]
 
 
+@app.get("/api/registry/log")
+def registry_log(limit: int = 50):
+    """The registry's git history: every install authored by the agent, every rollback/quarantine by the operator."""
+    if not (config.REGISTRY_DIR / ".git").exists():
+        return []  # the fake registry has no history
+    fmt = "%h%x1f%an%x1f%aI%x1f%s%x1f%D"
+    out = subprocess.run(["git", "-C", str(config.REGISTRY_DIR), "log", f"-n{max(1, min(limit, 500))}", f"--format={fmt}"],
+                         capture_output=True, text=True, check=False)
+    if out.returncode:
+        return []  # no commits yet
+    return [dict(zip(("sha", "author", "date", "subject", "refs"), line.split("\x1f"))) for line in out.stdout.splitlines()]
+
+
 @app.post("/api/registry/{name}/rollback")
 def rollback(name: str, v: Version):
     reg = make_registry()
@@ -277,7 +291,7 @@ def rollback(name: str, v: Version):
 @app.post("/api/registry/{name}/quarantine")
 def quarantine(name: str):
     try:
-        make_registry().quarantine(name)
+        make_registry().quarantine(name)  # TODO(A): also revoke the capability's proxy domains
     except KeyError:
         raise HTTPException(404, f"{name} is not installed") from None
     events.emit(EventType.QUARANTINE, name=name, by="operator")

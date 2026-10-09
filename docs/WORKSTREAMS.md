@@ -1,6 +1,6 @@
 # Working in parallel
 
-Three people, three workstreams, one repo. The split follows plan §9: **A** kernel, **B** agent, **C** operator console + delivery. **D**, channels (Telegram bot, voice, credentials), is a later addition on top of the same contracts — see its own section below.
+Three people, three workstreams, one repo. The split follows plan §9: **A** kernel, **B** agent, **C** delivery. **D**, the operator dashboard and channels (Telegram/Discord bots, voice, credentials), is a later addition on top of the same contracts — see its own section below.
 
 ## Rules
 
@@ -18,8 +18,8 @@ Three people, three workstreams, one repo. The split follows plan §9: **A** ker
 | `harness/kernel/sandbox.py`, `proxy.py`, `registry.py` | **A** | done: Docker sandbox behind the egress proxy, git registry. The default now |
 | `harness/agent/`, `harness/cli.py` | **B** | kernel tools done except `study`; `run_session` stub; empty prompts |
 | `harness/ops/events.py`, `approvals.py` | **C** | done: JSONL log + approval/kill over the log |
-| `ui/`, `scripts/`, `testdata/`, `README.md`, video | **C** | bare console that works; fake run script |
-| `channels/` | **D** | Telegram bot (text + voice) in front of `frank run`, ElevenLabs voice, a credentials page |
+| `scripts/`, `testdata/`, `README.md`, video | **C** | fake run script, preflight, evidence, packaging |
+| `channels/` | **D** | the operator dashboard (`web.py`), Telegram + Discord bots (text + voice) in front of `frank run`, ElevenLabs voice |
 | `tests/test_<area>.py` | owner of the area | |
 | `registry/` | **nobody**: only the agent, through the gate | |
 
@@ -73,26 +73,26 @@ Dev loop: `FRANK_APPROVER=cli uv run frank run --session A "<task 1>"`.
 The default is now the Docker sandbox and git registry. ⚠️ `FRANK_FAKE=sandbox` (`LocalSandbox`) runs generated code **on your machine**: only for team-written fixtures.
 Prompts go in `agent/prompts/` and must pass `tests/test_prompt_hygiene.py`: no hosts, no endpoints, no expected tool names.
 
-## Stream C: operator console, event log, test data, delivery
+## Stream C: event log, test data, delivery
 
-Owns `ui/`, `harness/ops/`, `scripts/`, `testdata/`, `README.md`. Doesn't need the agent.
+Owns `harness/ops/`, `scripts/`, `testdata/`, `README.md`. Doesn't need the agent. (The operator console that used to live in `ui/` was merged into stream D's dashboard, `channels/web.py`.)
 
-1. The console against `scripts/fake_run.py`: lab panel (code, tests, red → green), approval card with the permissions diff, budget meter, registry view, kill, rollback, quarantine.
+1. `scripts/fake_run.py`: scripted runs that drive the dashboard's lab panel, approval card, budget meter, registry view, kill, rollback and quarantine without the agent.
 2. `testdata/` invoices (see `testdata/README.md`).
 3. README: how to run, plus the real/simulated/missing table. Rehearse the video storyboard (plan §11).
 
-Dev loop: `uv run uvicorn ui.app:app --reload` in one terminal, `uv run python scripts/fake_run.py` in another, then approve in the browser.
+Dev loop: `uv run uvicorn channels.web:app --reload --port 8001` in one terminal, `uv run python scripts/fake_run.py` in another, then approve in the browser.
 
-## Stream D: channels (Telegram + Discord bots, voice, dashboard)
+## Stream D: the operator dashboard and channels (Telegram + Discord bots, voice)
 
-Owns `channels/`. A chat/voice front end to the same harness the CLI and console already use, not a new agent path: each incoming task spawns `frank run --session <channel>-<chat>` as its own subprocess, exactly as if an operator had typed it. Nothing here touches `harness/agent/`, so rule 2 (no hints to Frankenstein) is unaffected — this code is operator-facing, like the README's API check.
+Owns `channels/`. The operator's web page, plus a chat/voice front end to the same harness the CLI already uses, not a new agent path: each incoming task spawns `frank run --session <channel>-<chat>` as its own subprocess, exactly as if an operator had typed it. Nothing here touches `harness/agent/`, so rule 2 (no hints to Frankenstein) is unaffected — this code is operator-facing, like the README's API check.
 
 1. `channels/telegram/bot.py` and `channels/discord_bot.py`: a `python-telegram-bot` app and a `discord.py` client, same shape — a text message, or a transcribed voice message, becomes one `frank run` subprocess per request. Discord responds in DMs always, in a server channel only when @mentioned; both use the same plain-text `/quality` and `/kill` commands (not Discord's native slash commands, which would need their own sync step) so the two bots share one command style. `channels/chat.py` holds what's genuinely platform-agnostic between them (quality/busy state, approval-callback-data encoding, message truncation) so neither file reimplements the other's logic.
-2. `channels/runner.py`: spawns the subprocess with `FRANK_APPROVER=ui` and tails the shared event log for that run's `run_id` (matched from its `run_started`'s `session`), so installs can be approved from either bot or the console, whichever responds first (all three just call `harness.ops.approvals.decide`), and the chat gets live progress (gap → build → test → install) instead of silence during a multi-minute build.
+2. `channels/runner.py`: spawns the subprocess with `FRANK_APPROVER=ui` and tails the shared event log for that run's `run_id` (matched from its `run_started`'s `session`), so installs can be approved from either bot or the dashboard, whichever responds first (all three just call `harness.ops.approvals.decide`), and the chat gets live progress (gap → build → test → install) instead of silence during a multi-minute build.
 3. Cost: `FRANK_MODELS=cheap` by default per chat (stream B's existing switch), `/quality full` to opt a chat into the real tier. The existing `MAX_USD_PER_RUN`/`MAX_RUN_MINUTES` caps are the hard backstop; nothing new was added there.
 4. `channels/voice.py`: ElevenLabs Scribe for incoming voice (STT), the voice API for the reply (TTS). The reply's text is sent immediately; the voice note follows once synthesized, so the user isn't blocked on audio generation. Telegram sends it as a voice note; Discord as a file attachment (no bot-API equivalent of Discord's own voice-message UI).
 5. `channels/apify.py`: thin, best-effort REST wrapper for a channel's own direct use. The real Apify integration is stream A's gateway mode (`harness/kernel/vault.py`) and `study()`'s Apify search (`harness/agent/tools.py`): when the operator has given a channel an Apify or ElevenLabs key, `channels/credentials.py:offered_secrets` passes it through to a channel-triggered run as `APIFY_TOKEN`/`ELEVENLABS_API_KEY` + `FRANK_SECRETS`, the same way a terminal operator's `.env` would, so Frankenstein can actually build and call a keyed-API capability for that chat's task.
-6. `channels/web.py`: a dashboard, separate from the console's page but reading and writing the *same* event log and registry — a decision made here or on `ui/`'s console shows up on both. Leans toward "configure it, see the outputs" over the console's build-by-build lab view: a "New task" form (its own `POST /api/tasks`, same `channels.runner.run_task`), stat tiles (runs, active now, success rate, spend), a runs-by-status bar and a spend-per-run sparkline (`channels/static/dashboard.{html,css,js}`, styled off the console's own design tokens), a recent-runs/outputs list built on `scripts.evidence.summarize` (so "what happened" isn't computed a second way), plus the same approvals, budget meter, registry (rollback/quarantine) and kill-switch controls the console has. Credentials are entered here too: unchecked "remember" = held in memory for that process only; checked = persisted to `~/.frankenstein/credentials.json` (outside the repo, `0600`), never into `registry/`, `logs/`, or git (Claude access rule: never write a credential into the repo, the event log or a sandbox mount). Each key is only asked for lazily, the first time its service is actually needed.
+6. `channels/web.py`: the operator dashboard (plan §6), the one web page, reading and writing the shared event log and registry. A "New task" form (its own `POST /api/tasks`, same `channels.runner.run_task`); stat tiles (runs, active now, success rate, spend), a runs-by-status bar and a spend-per-run sparkline; the selected run's task, plan, answer with its provenance check, banners and budget meters; the lab panel (gaps, studies, each build, test run with its output, approval, install and call, and the generated files); approval cards with the manifest, permissions diff, the harness's test log and the code, Approve disabled when tests failed; the registry with rollback/quarantine and its git history; a timeline; a recent-runs/outputs list built on `scripts.evidence.summarize` (so "what happened" isn't computed a second way), each expandable into its log; kill one run or all of them (`channels/static/dashboard.{html,css,js}`). Credentials are entered here too: unchecked "remember" = held in memory for that process only; checked = persisted to `~/.frankenstein/credentials.json` (outside the repo, `0600`), never into `registry/`, `logs/`, or git (Claude access rule: never write a credential into the repo, the event log or a sandbox mount). Each key is only asked for lazily, the first time its service is actually needed.
 7. `channels/run.py`: runs the dashboard plus both bots in one process, each starting on its own as soon as its token is available (setting up Telegram doesn't block on a Discord token nobody's supplied yet, or the other way round) — the way to actually get "chat with it on either platform" rather than picking one.
 
 Dev loop: `uv run python -m channels.run` — one process, the dashboard comes up immediately on `:8001` (open it to paste a Telegram and/or Discord bot token; see the Telegram section's note on getting one from @BotFather, and Discord's from https://discord.com/developers/applications — enable the "Message Content" privileged intent there or the bot can't read task text), sharing one in-memory `CredentialStore`. `uv run python -m channels.telegram.bot` or `uv run python -m channels.discord_bot` still work standalone (useful with only one platform set up), each with their own embedded dashboard.
@@ -152,7 +152,7 @@ Refusals come back as `InstallResult(installed=False, reason=..., test_report=No
 5. README real/simulated/missing table, add:
    - Real: Docker sandbox (no host env, no home, read-only call mounts, limits); egress proxy (CONNECT allowlist, no TLS interception, so it sees hosts, not URLs).
    - Limits: quarantine doesn't cut a call already in flight (≤ 60 s); prompt skills aren't installable; deps need PyPI reachable.
-6. Before switching the console to real runs: move aside any `registry/` left from fake runs. The git registry refuses a non-git folder.
+6. Before switching the dashboard to real runs: move aside any `registry/` left from fake runs. The git registry refuses a non-git folder.
 
 ### Shared
 

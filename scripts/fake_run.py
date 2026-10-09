@@ -107,7 +107,7 @@ class Run:
 
     def budget(self, turns: int = 1, usd: float = 0.02, gaps: int = 0, building: bool = False) -> None:
         """`building=True` for a builder/tester/repair turn, counted against the active gap, like the
-        real Budget.building(); the console's meters show planner_turns and gap_turns, not the old `turns`."""
+        real Budget.building(); the dashboard's meters show planner_turns and gap_turns, not the old `turns`."""
         self.turns += turns
         self.gaps += gaps
         self.usd += usd

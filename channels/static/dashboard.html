@@ -1,9 +1,10 @@
 <!doctype html>
-<!-- Owner: D. Same event log and registry as the operator console (ui/), a different
-     surface: fewer build-by-build details, more "configure it, see the outputs" —
-     credentials, aggregate stats and a recent-runs list up front, the console's
-     approval/budget/registry controls still all here. One file per concern
-     (dashboard.css, dashboard.js), no build step, served by channels/web.py. -->
+<!-- Owner: D. The one operator page (plan §6): start a task, approve installs from the full card
+     (manifest, permissions diff, harness test log, code) in a modal that blocks the page until decided, watch the selected run's lab, budget
+     and timeline, roll back or quarantine from the registry, kill one run or all of them, and
+     enter channel credentials. Everything is derived from the shared event log (/api/events)
+     plus /api/summary, /api/registry and /api/config. One file per concern (dashboard.css,
+     dashboard.js), no build step, served by channels/web.py. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -16,9 +17,11 @@
   <h1>Frankenstein</h1>
   <span id="chips"></span>
   <span class="spacer"></span>
+  <label class="muted run-pick">Run <select id="runSelect"><option value="">waiting for a run…</option></select></label>
+  <span id="runStatus" class="chip">idle</span>
   <span id="live" class="chip">connecting…</span>
   <button id="reset" hidden title="Dev only: move the registry, the event log and the build workspaces to rehearsals/ and start empty">Start from scratch</button>
-  <button id="kill" class="danger">Kill switch</button>
+  <button id="kill" class="danger" data-act="kill">Kill switch</button>
 </header>
 
 <div id="banners" class="banners" hidden></div>
@@ -60,8 +63,24 @@
     </div>
   </section>
 
-  <section class="cols">
+  <section class="card" id="run">
+    <h2>Run</h2>
+    <div id="runBanners" class="run-banners" hidden></div>
+    <div id="task" class="muted">No run yet. Start one above, with <span class="mono">frank run</span>, from a chat bot, or with <span class="mono">scripts/fake_run.py</span>.</div>
+  </section>
+
+  <section class="card">
+    <h2>Budget <span id="caps" class="muted" style="text-transform:none;letter-spacing:0"></span></h2>
+    <div id="meters" class="meters"></div>
+  </section>
+
+  <section class="cols cols-wide">
     <div class="stack">
+
+      <div class="card">
+        <h2>Lab <span id="labCount" class="count">0</span></h2>
+        <div id="lab" class="muted">Gaps, builds and test runs of the selected run appear here.</div>
+      </div>
 
       <div class="card">
         <h2>Outputs <span id="runsCount" class="count">0</span></h2>
@@ -69,9 +88,8 @@
       </div>
 
       <div class="card">
-        <h2>Registry <span id="regCount" class="count">0</span></h2>
-        <table id="registry" class="reg-table"><tbody></tbody></table>
-        <div id="regEmpty" class="muted">Empty. Only the agent adds capabilities, through the install gate.</div>
+        <h2>Timeline <span id="evCount" class="count">0</span></h2>
+        <div id="timeline" class="timeline"></div>
       </div>
 
     </div>
@@ -79,13 +97,13 @@
     <div class="stack">
 
       <div class="card">
-        <h2>Approvals <span id="apprCount" class="count">0</span></h2>
-        <div id="approvals" class="muted">Nothing waiting for a decision.</div>
+        <h2>Registry <span id="regCount" class="count">0</span></h2>
+        <div id="registry"></div>
       </div>
 
       <div class="card">
-        <h2>Budget <span id="caps" class="muted" style="text-transform:none;letter-spacing:0"></span></h2>
-        <div id="meters" class="meters"></div>
+        <h2>Registry history <span id="logCount" class="count">0</span></h2>
+        <div id="reglog"></div>
       </div>
 
       <div class="card">
@@ -98,6 +116,8 @@
   </section>
 
 </main>
+
+<dialog id="approvalModal" class="approval-modal" aria-labelledby="approvalTitle"></dialog>
 
 <script src="/dashboard.js"></script>
 </body>

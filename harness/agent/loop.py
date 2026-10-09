@@ -49,7 +49,7 @@ MODELS = TIERS[config.MODELS]
 JUDGE_MODEL = HAIKU
 
 PROMPTS = Path(__file__).parent / "prompts"
-EVENT_FILE_CHARS = 20_000  # per file shown in the console's lab panel
+EVENT_FILE_CHARS = 20_000  # per file shown in the dashboard's lab panel
 FEEDBACK_CHARS = 8_000  # test output handed to the repair role
 ANSWER_RETRIES = 1  # how often an answer without provenance is sent back before it's accepted and flagged
 
