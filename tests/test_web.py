@@ -1,5 +1,5 @@
-"""Owner: D. Mirrors tests/test_console.py's patterns: the dashboard reads and writes the same
-shared event log and registry the console does, so it's tested the same way."""
+"""Owner: D. The dashboard's API against a tmp event log and a fake registry: every operator
+action goes through the shared log, the same one every run and channel reads."""
 
 from __future__ import annotations
 
@@ -70,10 +70,10 @@ def test_unknown_service_is_a_404(dashboard):
 
 def test_index_serves_the_dashboard_page(dashboard):
     w, _, _ = dashboard
-    assert "Frankenstein dashboard" in w.index()
+    assert "Frankenstein dashboard" in w.index().body.decode()
 
 
-# ---- config, approvals, kill, registry: parity with ui/app.py --------------------------------
+# ---- config, approvals, kill, registry ---------------------------------------------------------
 
 
 def test_config_exposes_the_caps(dashboard):
@@ -213,6 +213,23 @@ def test_rollback_to_the_active_version_is_refused_and_logs_nothing(dashboard, e
         w.rollback(manifest.name, w.Version(version=2))
     assert err.value.status_code == 409
     assert events.read_from(0)[0] == []
+
+
+def test_registry_log_shows_who_wrote_what(dashboard, tmp_path, monkeypatch):
+    from harness.kernel.registry import GitRegistry
+
+    w, _, _ = dashboard
+    monkeypatch.setattr(config, "REGISTRY_DIR", tmp_path / "git-registry")
+    assert w.registry_log() == []
+    registry = GitRegistry(config.REGISTRY_DIR)
+    [created] = w.registry_log()
+    manifest = Manifest.load(BUNDLE)
+    registry.install(BUNDLE, manifest)
+    registry.quarantine(manifest.name)
+    quarantine, install, first = w.registry_log()
+    assert first["sha"] == created["sha"]
+    assert install["author"] == "frankenstein-agent" and manifest.ref in install["refs"]
+    assert quarantine["author"] == "frankenstein-operator"
 
 
 def test_unknown_capability_is_a_404_and_logs_nothing(dashboard, events):

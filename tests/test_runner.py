@@ -155,7 +155,7 @@ async def test_run_task_reports_a_subprocess_that_never_starts(tmp_path, monkeyp
     assert "boom" in updates[-1].text
 
 
-def test_decide_approval_writes_the_same_event_the_console_writes(tmp_path):
+def test_decide_approval_writes_the_same_event_the_dashboard_writes(tmp_path):
     log_path = tmp_path / "events.jsonl"
     decide_approval("req1", True, "telegram:alice", reason="looks fine", log_path=log_path)
     events, _ = EventLog(log_path, session="reader").read_from(0)

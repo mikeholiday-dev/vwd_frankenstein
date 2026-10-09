@@ -56,7 +56,7 @@ class RunSummary:
 
 
 def operator_actions(events: list[Event]) -> list[str]:
-    """What the operator did from the console outside an approval: kill, rollback, quarantine."""
+    """What the operator did outside an approval: kill, rollback, quarantine."""
     out = []
     for e in events:
         d = e.data
@@ -75,7 +75,7 @@ def summarize(events: list[Event]) -> list[RunSummary]:
     requests = {e.data["id"]: (e.run_id, e.data["ref"]) for e in events if e.type == EventType.APPROVAL_REQUESTED}
     for e in events:
         d = e.data
-        if e.type == EventType.APPROVAL_DECIDED:  # written by the console under its own run id: file it under the request's run
+        if e.type == EventType.APPROVAL_DECIDED:  # written by the approver under its own run id: file it under the request's run
             run_id, ref = requests.get(d["request_id"], (e.run_id, ""))
             runs.setdefault(run_id, RunSummary(run_id, e.session, started=e.ts)).approvals.append((ref, d["approved"], d["by"]))
             continue
@@ -117,11 +117,11 @@ def summarize(events: list[Event]) -> list[RunSummary]:
                 r.status = d["status"]
                 r.budget = d.get("budget") or r.budget
     for e in events:
-        if e.type == EventType.KILL:  # the console writes it under session "ui", a bot channel under its own
+        if e.type == EventType.KILL:  # the dashboard writes it under session "web" (older logs: "ui"), a bot channel under its own
             for r in runs.values():
                 if r.started <= e.ts <= (r.last if r.status != "unfinished" else e.ts) and r.status in ("killed", "unfinished"):
                     r.killed_by = e.data["by"]
-    ordered = [r for r in runs.values() if r.task or r.installs or r.calls or r.tests]  # drops runs made only of console actions
+    ordered = [r for r in runs.values() if r.task or r.installs or r.calls or r.tests]  # drops runs made only of operator actions
     earlier: set[str] = set()
     for r in sorted(ordered, key=lambda x: x.started):
         r.installed_refs = {ref for ref, ok, _ in r.installs if ok}
@@ -161,7 +161,7 @@ def render(runs: list[RunSummary], history: list[dict[str, str]] = (), actions: 
     for r in runs:
         out += _run(r)
     if actions:
-        out += ["## Operator actions from the console", "", *[f"- {a}" for a in actions], ""]
+        out += ["## Operator actions", "", *[f"- {a}" for a in actions], ""]
     if history:
         out += ["## Registry history (git)", "", "| Commit | Author | When | Message | Tags |", "|---|---|---|---|---|"]
         for c in history:

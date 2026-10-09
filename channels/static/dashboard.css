@@ -1,7 +1,6 @@
-/* Owner: D. Same design tokens as ui/static/index.html (the console), so the two
-   surfaces read as one system. Chart-specific rules follow: one hue for magnitude
-   (spend), reserved status colors for state (never reused as generic series
-   colors), thin marks with rounded data-ends, a legend for >= 2 series. */
+/* Owner: D. Styles for the one operator page (dashboard.html). Chart-specific rules: one
+   hue for magnitude (spend), reserved status colors for state (never reused as generic
+   series colors), thin marks with rounded data-ends, a legend for >= 2 series. */
 :root {
   --bg:#f4f5f7; --fg:#16181d; --muted:#626a76; --card:#fff; --line:#dcdfe5; --soft:#eef0f3;
   --ok:#17783a; --ok-bg:#e3f4e8; --bad:#c21f2b; --bad-bg:#fbe6e7; --warn:#8a5a00; --warn-bg:#fdf1d3; --info:#1d5fbf; --info-bg:#e4eefc;
@@ -20,6 +19,9 @@ header h1 { font-size:16px; margin:0; }
 .spacer { flex:1; }
 .muted { color:var(--muted); }
 .small { font-size:12px; }
+.mono { font-family:var(--mono); font-size:12px; }
+header .run-pick { display:flex; gap:6px; align-items:center; min-width:0; max-width:100%; font-size:13px; }
+header .run-pick select { min-width:0; max-width:min(420px, 100%); background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:5px 8px; color:var(--fg); font-size:12px; }
 .chip { display:inline-flex; align-items:center; font-size:12px; padding:3px 9px; border-radius:999px; background:var(--soft); color:var(--muted); }
 .chip.ok { background:var(--ok-bg); color:var(--ok); } .chip.bad { background:var(--bad-bg); color:var(--bad); }
 .chip.warn { background:var(--warn-bg); color:var(--warn); } .chip.info { background:var(--info-bg); color:var(--info); }
@@ -29,18 +31,55 @@ header h1 { font-size:16px; margin:0; }
 button { border:1px solid var(--line); background:var(--soft); color:var(--fg); border-radius:6px; padding:7px 12px; font-size:12px; cursor:pointer; }
 button.danger { background:var(--bad-bg); color:var(--bad); border-color:transparent; }
 button.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent; }
+button:hover:not(:disabled) { border-color:var(--muted); }
+button:disabled { opacity:.5; cursor:not-allowed; }
+button.small { padding:3px 9px; }
+pre { margin:6px 0 0; padding:8px 10px; background:var(--soft); border-radius:6px; font:12px/1.45 var(--mono); white-space:pre-wrap; word-break:break-word; max-height:320px; overflow:auto; }
+details.more { margin-top:4px; }
+details.more > summary { cursor:pointer; color:var(--muted); font-size:13px; }
+details.more[open] > summary { color:var(--fg); }
 
 .banners { padding:8px 16px 0; } .banner { padding:8px 12px; border-radius:8px; font-size:13px; margin-bottom:8px; }
 .banner.ok { background:var(--ok-bg); color:var(--ok); } .banner.bad { background:var(--bad-bg); color:var(--bad); } .banner.warn { background:var(--warn-bg); color:var(--warn); }
+.run-banners { margin-bottom:6px; } .run-banners .banner { font-weight:600; border:1px solid currentColor; }
 
 .wrap { max-width:1300px; margin:0 auto; padding:16px; display:grid; gap:16px; }
 .cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }
 .stack { display:grid; gap:16px; min-width:0; }
-@media (max-width:860px) { .cols { grid-template-columns:1fr; } }
+.cols-wide { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); }
+@media (max-width:860px) { .cols, .cols-wide { grid-template-columns:1fr; } }
 
 .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; min-width:0; }
 .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; display:flex; gap:8px; align-items:center; }
 .count { font-size:11px; background:var(--soft); color:var(--muted); border-radius:999px; padding:1px 7px; }
+
+/* ---- the selected run: task, plan, answer with its provenance check ---- */
+#run { scroll-margin-top:64px; }
+#task .task { font-size:15px; font-weight:600; margin-bottom:6px; }
+#task .plan { margin-top:6px; }
+.answer { margin-top:10px; border-left:3px solid var(--ok); padding:2px 0 2px 10px; }
+.answer.unverified { border-color:var(--bad); }
+
+/* ---- lab: one item per gap / study / capability, a step list per capability ---- */
+.item { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
+.item:first-of-type { margin-top:0; }
+.item.gap { border-left:3px solid var(--info); }
+.item.cap.red { border-left:3px solid var(--bad); } .item.cap.green { border-left:3px solid var(--ok); } .item.cap.wait { border-left:3px solid var(--warn); }
+.item .head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.item .head b { font-family:var(--mono); font-size:13px; }
+.steps { list-style:none; margin:8px 0 0; padding:0; }
+.steps li { padding:5px 0 5px 16px; border-left:2px solid var(--line); margin-left:4px; position:relative; }
+.steps li::before { content:""; position:absolute; left:-5px; top:11px; width:8px; height:8px; border-radius:50%; background:var(--line); }
+.steps li.pass::before { background:var(--ok); } .steps li.fail::before { background:var(--bad); } .steps li.wait::before { background:var(--warn); }
+.kv { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:3px 12px; margin:8px 0; font-size:13px; }
+.kv dt { color:var(--muted); } .kv dd { margin:0; min-width:0; }
+
+/* ---- timeline of the selected run plus operator actions ---- */
+.timeline .ev { display:grid; grid-template-columns:62px 150px minmax(0,1fr); gap:8px; padding:4px 0; border-top:1px solid var(--line); font-size:13px; }
+.timeline .ev:first-child { border-top:0; }
+.timeline .ev time { color:var(--muted); font-variant-numeric:tabular-nums; }
+.timeline .ev .kind { font-family:var(--mono); font-size:12px; color:var(--muted); }
+@media (max-width:600px) { .timeline .ev { grid-template-columns:56px minmax(0,1fr); } .timeline .ev .kind { display:none; } }
 
 /* ---- stat tiles: a hero number is the right form when the job is "one number", not a chart ---- */
 .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; }
@@ -49,7 +88,7 @@ button.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent; 
 .tile .value { font-size:24px; font-weight:650; font-variant-numeric:tabular-nums; }
 .tile .value small { font-size:13px; font-weight:400; color:var(--muted); }
 
-/* ---- budget meters (same component as the console) ---- */
+/* ---- budget meters ---- */
 .meters { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; }
 .meter .label { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
 .meter .value { font-size:18px; font-weight:650; font-variant-numeric:tabular-nums; }
@@ -93,35 +132,40 @@ details[open] > summary .toggle-hint::after { content:attr(data-hide); }
 summary:hover .toggle-hint, summary:hover .chev { color:var(--info); border-color:var(--info); }
 
 .run-item .head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:4px; }
-.run-item .run-kill { padding:3px 9px; flex-shrink:0; }
+.run-item .run-kill, .run-item .run-inspect { flex-shrink:0; }
+.run-item.selected { border-color:var(--info); }
 .run-item .task { font-weight:600; font-size:13px; }
 .run-item .answer { margin-top:6px; border-left:3px solid var(--ok); padding:2px 0 2px 10px; }
 .run-item .answer.unverified { border-color:var(--bad); }
-.tag { display:inline-flex; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--soft); color:var(--muted); font-family:var(--mono); }
+.tag { display:inline-flex; font-size:11px; padding:1px 7px; margin:1px 4px 1px 0; border-radius:999px; background:var(--soft); color:var(--muted); font-family:var(--mono); overflow-wrap:anywhere; }
+.tag.add { background:var(--ok-bg); color:var(--ok); } .tag.del { background:var(--bad-bg); color:var(--bad); text-decoration:line-through; }
 .tag.deny { background:var(--bad-bg); color:var(--bad); }
 .refused { color:var(--bad); font-weight:600; }
 
 /* ---- per-run full log, inside the <details> each output expands into ---- */
 .run-log { border-top:1px solid var(--line); padding:10px 12px; display:grid; gap:6px; }
-.run-log .ev { display:grid; grid-template-columns:62px 1fr; gap:10px; font-size:12px; }
+.run-log .ev { display:grid; grid-template-columns:62px max-content minmax(0,1fr); gap:6px 10px; font-size:12px; }
 .run-log .ev time { color:var(--muted); font-variant-numeric:tabular-nums; padding-top:1px; }
-.run-log .ev .kind { color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:.04em; margin-right:6px; }
+.run-log .ev .kind { color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:.04em; padding-top:2px; }
 .run-log .empty { color:var(--muted); font-size:12px; }
 
 /* ---- registry ---- */
 .reg-table { width:100%; border-collapse:collapse; font-size:13px; }
-.reg-table td { padding:6px 4px; border-top:1px solid var(--line); }
+.reg-table th { text-align:left; font-weight:500; color:var(--muted); font-size:12px; padding:0 6px 4px 4px; }
+.reg-table td { padding:6px 4px; border-top:1px solid var(--line); vertical-align:top; }
 .reg-table tr:first-child td { border-top:none; }
-.reg-table .name { font-family:var(--mono); }
-.reg-table .actions { text-align:right; }
-.reg-table .actions button { margin-left:6px; }
-tr.quarantined { opacity:.6; }
+.reg-table .name { font-family:var(--mono); overflow-wrap:anywhere; }
+.reg-table .actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.reg-table .actions button { padding:3px 9px; }
+tr.quarantined .name { text-decoration:line-through; color:var(--muted); }
 
 /* ---- approvals ---- */
-.approval { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
+.approval { border:2px solid var(--warn); border-radius:8px; padding:10px 12px; margin-top:10px; }
 .approval:first-of-type { margin-top:0; }
-.approval .head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
-.approval .actions { display:flex; gap:8px; margin-top:10px; }
+.approval .head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.approval .desc { margin:6px 0 2px; }
+.approval .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.approval .actions input { flex:1; min-width:120px; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:6px 8px; color:var(--fg); font-size:12px; }
 
 /* ---- credentials ---- */
 .cred-item { padding:6px 0; border-top:1px solid var(--line); }

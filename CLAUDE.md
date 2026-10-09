@@ -12,8 +12,8 @@ Hackathon, code freeze at sunrise. Prefer the simplest thing that works and keep
 |---|---|---|
 | A, kernel | `harness/kernel/` | `a/` |
 | B, agent | `harness/agent/`, `harness/cli.py` | `b/` |
-| C, console + delivery | `ui/`, `harness/ops/`, `scripts/`, `testdata/`, `README.md` | `c/` |
-| D, channels | `channels/` | `d/` |
+| C, delivery | `harness/ops/`, `scripts/`, `testdata/`, `README.md` | `c/` |
+| D, dashboard + channels | `channels/` | `d/` |
 
 Work out the stream from `CLAUDE.local.md` (personal, gitignored, e.g. `I'm on stream B`), then from the branch prefix. If neither tells you, ask.
 
@@ -29,7 +29,7 @@ uv run pytest                                   # must pass before every push
 uv run frank install tests/fixtures/bundles/echo_ok   # gate smoke test
 uv run frank call echo '{"text":"ahoj"}'
 uv run frank run --session A "<task>"           # one Frankenstein session (stream B)
-uv run uvicorn ui.app:app --reload              # console on :8000
+uv run uvicorn channels.web:app --reload --port 8001   # dashboard on :8001
 uv run python scripts/fake_run.py               # scripted run for UI work
 ```
 

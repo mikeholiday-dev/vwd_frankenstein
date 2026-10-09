@@ -16,7 +16,7 @@ flowchart TB
 
     subgraph HOST["HOST: trusted, team-written code. Never runs generated code."]
         cli["frank CLI<br/>harness/cli.py"]
-        ui["Operator console<br/>ui/app.py"]
+        ui["Operator dashboard<br/>channels/web.py"]
 
         subgraph AGENT["Agent: harness/agent/"]
             planner["Planner<br/>solves the task, reports gaps"]
@@ -57,7 +57,7 @@ flowchart TB
     sandbox --> proxy --> internet
 ```
 
-Numbers follow one gap from report to use. Every step also writes an event to the log, which the console streams live. Caps (`limits.py`) are checked before every agent tool call.
+Numbers follow one gap from report to use. Every step also writes an event to the log, which the dashboard streams live. Caps (`limits.py`) are checked before every agent tool call.
 
 ### The pieces
 
@@ -77,7 +77,7 @@ Numbers follow one gap from report to use. Every step also writes an event to th
 | **Limits** | `harness/kernel/limits.py` | Caps on gaps, repairs, turns (the planner's, and each gap's build), $ (API-equivalent), minutes and sandbox seconds. `budget.check()` runs before every tool call and also honours the kill switch. |
 | **Event log** | `harness/ops/events.py` → `logs/events.jsonl` | Append-only JSONL shared by every agent process and the UI. It is the bus between them, and the audit record. |
 | **Approvals** | `harness/ops/approvals.py` | `LogApprover` writes `approval_requested` and blocks until the UI appends `approval_decided` (or `kill`). |
-| **Console** | `ui/app.py`, `ui/static/index.html` | Streams the log over SSE. Shows the lab panel (code, tests, red → green), approval cards with the permissions diff, the budget meter, and the registry. It never imports the agent. |
+| **Dashboard** | `channels/web.py`, `channels/static/dashboard.{html,css,js}` | Streams the log over SSE. Starts tasks, shows the lab panel (code, tests, red → green), approval cards with the permissions diff, the budget meter, the registry and its git history, and holds channel credentials. It never imports the agent. |
 
 ---
 
@@ -86,7 +86,7 @@ Numbers follow one gap from report to use. Every step also writes an event to th
 ```mermaid
 flowchart TB
     subgraph T1["Trusted: team-written, runs on the host"]
-        A["agent loop, gate, host, limits,<br/>event log, console, study"]
+        A["agent loop, gate, host, limits,<br/>event log, dashboard, study"]
     end
     subgraph T2["Untrusted: Frankenstein-written, runs only in Docker"]
         B["capability.py, tests/,<br/>sandbox_exec experiments"]
@@ -121,7 +121,7 @@ sequenceDiagram
     participant T as Tester
     participant G as Install gate
     participant S as Docker sandbox + proxy
-    participant UI as Console
+    participant UI as Dashboard
     participant R as registry/
     participant H as Capability host
 
@@ -155,7 +155,7 @@ sequenceDiagram
     Note over P,CLI: Provenance check: every fact must cite a successful call from this run
 ```
 
-Every arrow above also writes an event to `logs/events.jsonl` (`plan`, `gap`, `study`, `build`, `test_run`, `approval_requested`, `install`, `call`, `answer`, `budget`, ...). That is how the console shows the run live and how the run can be audited afterwards.
+Every arrow above also writes an event to `logs/events.jsonl` (`plan`, `gap`, `study`, `build`, `test_run`, `approval_requested`, `install`, `call`, `answer`, `budget`, ...). That is how the dashboard shows the run live and how the run can be audited afterwards.
 
 ### A second session
 
@@ -185,14 +185,14 @@ After install it lives in `registry/<name>/` with a git tag `<name>@v<N>`. To ca
 flowchart LR
     a["frank run --session A<br/>process 1"] -- append --> log[("logs/events.jsonl")]
     b["frank run --session B<br/>process 2, later"] -- append --> log
-    log -- "tail + SSE" --> ui["uvicorn ui.app:app<br/>console on :8000"]
+    log -- "tail + SSE" --> ui["channels.web<br/>dashboard on :8001"]
     ui -- "append approval_decided, kill" --> log
     log -- "poll for decision / kill" --> a & b
     ui -- "rollback / quarantine" --> reg[("registry/")]
     a & b -- "install via gate" --> reg
 ```
 
-There is no RPC between processes: the event log is the only channel. That keeps the agent and the console independent, and puts every decision on the record.
+There is no RPC between processes: the event log is the only channel. That keeps the agent and the dashboard independent, and puts every decision on the record.
 
 ---
 
@@ -204,7 +204,7 @@ Each stream could work before the others were done because every component has a
 |---|---|---|---|
 | Sandbox | `kernel.sandbox.DockerSandbox` | `fakes.LocalSandbox`: runs code **on your machine** | `FRANK_FAKE=sandbox` |
 | Registry | `kernel.registry.GitRegistry` | `fakes.DirRegistry` | `FRANK_FAKE=registry` |
-| Approver | `fakes.CliApprover` (terminal prompt, default) or `ops.approvals.LogApprover` (console card) | `fakes.AutoApprover` | `FRANK_APPROVER=cli`, `ui` or `auto` |
+| Approver | `fakes.CliApprover` (terminal prompt, default) or `ops.approvals.LogApprover` (dashboard card) | `fakes.AutoApprover` | `FRANK_APPROVER=cli`, `ui` or `auto` |
 
 `FRANK_MODE=demo` refuses every fake and the auto approver.
 
@@ -217,4 +217,4 @@ Each stream could work before the others were done because every component has a
 3. `harness/agent/loop.py`: plan → gap → build → test → install → answer.
 4. `harness/kernel/gate.py`: why nothing untested gets in.
 5. `harness/kernel/host.py` and `sandbox.py`: how a capability actually runs.
-6. `ui/app.py`: what the operator sees and can do.
+6. `channels/web.py` and `channels/static/dashboard.js`: what the operator sees and can do.

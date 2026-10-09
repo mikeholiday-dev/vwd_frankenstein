@@ -1,14 +1,13 @@
-"""Operator console API and the scripted runs that drive it. Owner: C."""
+"""The scripted fake runs that drive the dashboard without the agent, and fresh_start. Owner: C."""
 
 import importlib.util
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 
 from harness import config, fakes
 from harness.contracts import REQUIRED_FIELDS, EventType, Manifest
-from harness.kernel.limits import LIMITS, MAX_REPAIRS_PER_GAP
+from harness.kernel.limits import MAX_REPAIRS_PER_GAP
 from harness.ops.events import EventLog
 
 BUNDLE = Path(__file__).parent / "fixtures" / "bundles" / "echo_ok"
@@ -22,16 +21,6 @@ def _load(name: str, path: Path):
 
 
 @pytest.fixture
-def console(events, tmp_path, monkeypatch):
-    from ui import app
-
-    registry = fakes.DirRegistry(tmp_path / "registry")
-    monkeypatch.setattr(app, "events", events)
-    monkeypatch.setattr(app, "make_registry", lambda: registry)
-    return app, registry
-
-
-@pytest.fixture
 def fake_run(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "LOG_PATH", tmp_path / "events.jsonl")
     return _load("fake_run", config.ROOT / "scripts" / "fake_run.py")
@@ -39,59 +28,6 @@ def fake_run(tmp_path, monkeypatch):
 
 def types(log: EventLog) -> list[EventType]:
     return [e.type for e in log.read_from(0)[0]]
-
-
-def test_decision_and_kill_go_through_the_log(console, events):
-    app, _ = console
-    app.approve("req-1", app.Decision(approved=False, reason="too many domains"))
-    app.kill()
-    decided, kill = events.read_from(0)[0]
-    assert decided.type == EventType.APPROVAL_DECIDED
-    assert decided.data == {"request_id": "req-1", "approved": False, "by": "operator", "reason": "too many domains"}
-    assert kill.type == EventType.KILL and kill.data["by"] == "operator"
-
-
-def test_config_exposes_the_caps(console):
-    app, _ = console
-    assert app.settings()["limits"] == LIMITS
-
-
-def test_rollback_and_quarantine_are_logged(console, events):
-    app, registry = console
-    manifest = Manifest.load(BUNDLE)
-    registry.install(BUNDLE, manifest)
-    assert app.rollback(manifest.name, app.Version(version=manifest.version))["manifest"]["name"] == manifest.name
-    app.quarantine(manifest.name)
-    assert types(events) == [EventType.ROLLBACK, EventType.QUARANTINE]
-    assert app.registry()[0]["status"] == "quarantined"
-
-
-def test_registry_log_shows_who_wrote_what(console, tmp_path, monkeypatch):
-    from harness.kernel.registry import GitRegistry
-
-    app, _ = console
-    monkeypatch.setattr(config, "REGISTRY_DIR", tmp_path / "git-registry")
-    assert app.registry_log() == []
-    registry = GitRegistry(config.REGISTRY_DIR)
-    [created] = app.registry_log()
-    manifest = Manifest.load(BUNDLE)
-    registry.install(BUNDLE, manifest)
-    registry.quarantine(manifest.name)
-    quarantine, install, first = app.registry_log()
-    assert first["sha"] == created["sha"]
-    assert install["author"] == "frankenstein-agent" and manifest.ref in install["refs"]
-    assert quarantine["author"] == "frankenstein-operator"
-
-
-def test_unknown_capability_is_a_404_and_logs_nothing(console, events):
-    app, registry = console
-    manifest = Manifest.load(BUNDLE)
-    registry.install(BUNDLE, manifest)
-    for call in (lambda: app.rollback(manifest.name, app.Version(version=99)), lambda: app.rollback("nope", app.Version(version=1)), lambda: app.quarantine("nope")):
-        with pytest.raises(HTTPException) as err:
-            call()
-        assert err.value.status_code == 404
-    assert types(events) == []
 
 
 @pytest.mark.parametrize("scenario,status", [("task1", "ok"), ("upgrade", "ok"), ("capped", "capped")])

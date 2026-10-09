@@ -33,7 +33,7 @@ def checks(offline: bool = False, env: dict[str, str] | None = None) -> list[tup
     add("OK" if mode == "demo" else "WARN", f"FRANK_MODE={mode}", "" if mode == "demo" else "export FRANK_MODE=demo for the recorded run (it refuses fakes and the auto approver)")
     add("OK" if fakes in ("", "none") else "FAIL", f"FRANK_FAKE={fakes}", "" if fakes in ("", "none") else "fakes run generated code on this machine or skip the git registry")
     approver = env.get("FRANK_APPROVER", "cli")
-    add("OK" if approver == "ui" else "WARN", f"FRANK_APPROVER={approver}", "" if approver == "ui" else "use ui so the operator approves on the console card")
+    add("OK" if approver == "ui" else "WARN", f"FRANK_APPROVER={approver}", "" if approver == "ui" else "use ui so the operator approves on the dashboard card")
     if env.get("ANTHROPIC_API_KEY"):
         add("FAIL", "ANTHROPIC_API_KEY is set", "unset it: the Agent SDK would use and bill it instead of the subscription")
     else:
@@ -63,15 +63,15 @@ def checks(offline: bool = False, env: dict[str, str] | None = None) -> list[tup
         add("OK", "registry is empty or absent")
     size = log.stat().st_size if log.exists() else 0
     add("OK" if size == 0 else "WARN", f"event log {log} " + ("is empty" if size == 0 else f"holds {size} bytes"),
-        "" if size == 0 else "an old run would show in the console: scripts/fresh_start.py")
+        "" if size == 0 else "an old run would show on the dashboard: scripts/fresh_start.py")
     if work.exists() and any(work.iterdir()):
         add("WARN", f"work folder {work} has old build workspaces", "scripts/fresh_start.py moves it aside")
 
-    port = int(env.get("PORT", "8000"))
+    port = int(env.get("FRANK_CREDENTIALS_PORT", "8001"))
     with socket.socket() as s:
         s.settimeout(1)
-        add("OK" if s.connect_ex(("127.0.0.1", port)) == 0 else "WARN", f"console {'is up' if s.connect_ex(('127.0.0.1', port)) == 0 else 'is not running'} on :{port}",
-            "" if s.connect_ex(("127.0.0.1", port)) == 0 else "uv run uvicorn ui.app:app")
+        up = s.connect_ex(("127.0.0.1", port)) == 0
+    add("OK" if up else "WARN", f"dashboard {'is up' if up else 'is not running'} on :{port}", "" if up else "uv run python -m channels.run")
 
     for name in ("testdata/invoice_ok.pdf", "testdata/invoice_bad_account.pdf", "testdata/tasks.md"):
         add("OK" if (config.ROOT / name).is_file() else "FAIL", name)

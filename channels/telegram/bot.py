@@ -1,10 +1,10 @@
 """The Telegram bot. Owner: D.
 
-One process: Telegram polling plus the embedded dashboard (channels/web.py: console controls + credentials)
+One process: Telegram polling plus the embedded dashboard (channels/web.py: operator controls + credentials)
 on CREDENTIALS_PORT, sharing one CredentialStore. A text or voice message becomes
 one channels.runner.run_task() call; progress is relayed into the chat as
 it happens, approvals can be decided from an inline keyboard here or from the web
-console (both just write to the same event log), and the final answer is spoken
+dashboard (both just write to the same event log), and the final answer is spoken
 back through ElevenLabs when a key is available.
 
   uv run python -m channels.telegram.bot    # needs FRANK_TELEGRAM_KEY or a token entered on the dashboard
