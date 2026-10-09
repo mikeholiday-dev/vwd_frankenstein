@@ -7,6 +7,7 @@ message truncation) is tested without a live bot or network.
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -334,3 +335,199 @@ async def test_voice_message_without_a_key_asks_for_one_and_does_not_transcribe(
     await bot.on_voice(update, context)
     assert not called
     assert "elevenlabs" in update.message.sent[0][0].lower() or "key" in update.message.sent[0][0].lower()
+
+
+# ---- /start, /kill, plain text, voice with a key ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_start_command_greets_and_mentions_the_commands():
+    update = make_update()
+    await bot.on_start(update, make_context())
+    text = update.message.sent[0][0]
+    assert "/quality" in text and "/kill" in text
+
+
+@pytest.mark.asyncio
+async def test_kill_command_emits_a_kill_event(monkeypatch, tmp_path):
+    from harness import config
+    from harness.contracts import EventType
+
+    monkeypatch.setattr(config, "LOG_PATH", tmp_path / "events.jsonl")
+    update = make_update(username="alice")
+    await bot.on_kill(update, make_context())
+    assert "Kill sent" in update.message.sent[0][0]
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert events[-1]["type"] == EventType.KILL.value
+    assert events[-1]["data"]["by"] == "telegram:alice"
+
+
+@pytest.mark.asyncio
+async def test_plain_text_message_becomes_a_task(monkeypatch):
+    seen = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
+        seen["task"] = task
+        yield Progress("answer", "pong")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    update = make_update(text="ping")
+    await bot.on_text(update, make_context())
+    assert seen["task"] == "ping"
+    assert any(sent[0] == "pong" for sent in update.message.sent)
+
+
+@pytest.mark.asyncio
+async def test_voice_message_with_a_key_transcribes_and_runs_the_task(monkeypatch):
+    seen = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
+        seen["task"] = task
+        yield Progress("answer", "done")
+
+    class FakeVoiceFile:
+        async def download_as_bytearray(self):
+            return bytearray(b"ogg")
+
+    async def get_file():
+        return FakeVoiceFile()
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    monkeypatch.setattr(bot.voice, "transcribe", lambda audio, api_key: "convert 10 eur")
+    monkeypatch.setattr(bot.voice, "speak", lambda text, api_key: b"mp3")
+    store = CredentialStore()
+    store.set("elevenlabs", "el-key")
+    update = make_update()
+    update.message.voice = SimpleNamespace(get_file=get_file)
+    await bot.on_voice(update, make_context(store=store))
+    assert seen["task"] == "convert 10 eur"
+    texts = [s[0] for s in update.message.sent]
+    assert "Heard: convert 10 eur" in texts and "done" in texts and "<voice>" in texts
+
+
+@pytest.mark.asyncio
+async def test_voice_transcription_failure_is_reported_not_raised(monkeypatch):
+    def boom(audio, api_key):
+        raise RuntimeError("bad key")
+
+    class FakeVoiceFile:
+        async def download_as_bytearray(self):
+            return bytearray(b"ogg")
+
+    async def get_file():
+        return FakeVoiceFile()
+
+    monkeypatch.setattr(bot.voice, "transcribe", boom)
+    store = CredentialStore()
+    store.set("elevenlabs", "el-key")
+    update = make_update()
+    update.message.voice = SimpleNamespace(get_file=get_file)
+    await bot.on_voice(update, make_context(store=store))
+    assert "bad key" in update.message.sent[0][0]
+
+
+# ---- routing through the real Application: raw Telegram JSON in, bot replies out ------------------
+
+
+def _raw_update(update_id: int, **message_fields) -> dict:
+    return {
+        "update_id": update_id,
+        "message": {
+            "message_id": update_id,
+            "date": 1_700_000_000,
+            "chat": {"id": 7, "type": "private", "first_name": "Al"},
+            "from": {"id": 42, "is_bot": False, "first_name": "Al", "username": "alice"},
+            **message_fields,
+        },
+    }
+
+
+@pytest.fixture
+def routed_app(monkeypatch):
+    """build_app() with the Telegram network calls replaced by recorders, so a raw update goes
+    through the same handler/filter routing the live bot uses."""
+    from telegram import Message, User
+    from telegram.ext import ExtBot
+
+    sent: list[str] = []
+
+    async def send_message(self, chat_id, text, *a, **k):
+        sent.append(text)
+        return Message(message_id=1000 + len(sent), date=None, chat=SimpleNamespace(id=chat_id), text=text)
+
+    async def edit_message_text(self, text, *a, **k):
+        sent.append(f"[edit] {text}")
+
+    monkeypatch.setattr(ExtBot, "send_message", send_message)
+    monkeypatch.setattr(ExtBot, "edit_message_text", edit_message_text)
+    application = bot.build_app("123456:TEST-TOKEN", CredentialStore())
+    application._initialized = True
+    application.bot._bot_user = User(id=1, first_name="frank", is_bot=True, username="frank_bot")
+    return application, sent
+
+
+async def _feed(application, raw: dict) -> None:
+    from telegram import Update
+
+    await application.process_update(Update.de_json(raw, application.bot))
+
+
+@pytest.mark.asyncio
+async def test_routed_start_command_gets_a_reply(routed_app):
+    application, sent = routed_app
+    await _feed(application, _raw_update(1, text="/start", entities=[{"type": "bot_command", "offset": 0, "length": 6}]))
+    assert sent and "Frankenstein" in sent[0]
+
+
+@pytest.mark.asyncio
+async def test_routed_text_message_runs_a_task_and_replies_with_the_answer(routed_app, monkeypatch):
+    application, sent = routed_app
+    seen = {}
+
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
+        seen.update(task=task, session=session)
+        yield Progress("answer", "hello from frank")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    await _feed(application, _raw_update(2, text="say hello"))
+    assert seen["task"] == "say hello"
+    assert seen["session"].startswith("telegram-7-")
+    assert "hello from frank" in sent
+
+
+@pytest.mark.asyncio
+async def test_routed_slash_command_is_not_treated_as_a_task(routed_app, monkeypatch):
+    application, sent = routed_app
+    called = []
+
+    async def fake_run_task(*a, **k):
+        called.append(1)
+        yield Progress("answer", "x")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    await _feed(application, _raw_update(3, text="/quality full", entities=[{"type": "bot_command", "offset": 0, "length": 8}]))
+    assert not called
+    assert any("full" in s for s in sent)
+
+
+# ---- no "Starting…" placeholder; approvals tappable while a run is in flight -----------------------
+
+
+@pytest.mark.asyncio
+async def test_no_starting_message_and_first_reply_is_the_first_real_progress_line(monkeypatch):
+    async def fake_run_task(task, *, session, models, secrets=None, attach=()):
+        yield Progress("started", "Starting: do it")
+        yield Progress("plan", "Plan: call a tool")
+        yield Progress("answer", "result")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    update = make_update()
+    await bot.handle_task(update, make_context(), "do it")
+    texts = [s[0] for s in update.message.sent]
+    assert texts == ["Plan: call a tool", "result"]
+    assert not any("Starting" in t for t in texts)
+
+
+def test_updates_are_processed_concurrently_so_approval_taps_are_not_queued_behind_a_running_task():
+    application = bot.build_app("123456:TEST-TOKEN", CredentialStore())
+    assert application.update_processor.max_concurrent_updates > 1

@@ -126,7 +126,7 @@ async def handle_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task: 
     chat_data["busy"] = True
     attach = chat_data.pop("pending_attachments", [])
     session = f"telegram-{update.effective_chat.id}-{uuid.uuid4().hex[:8]}"
-    status_msg = await update.message.reply_text("Starting…")
+    status_msg = None
     lines: list[str] = []
     answer_text: str | None = None
     secrets = offered_secrets(context.bot_data["store"])
@@ -138,8 +138,13 @@ async def handle_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task: 
             if upd.kind == "answer":
                 answer_text = upd.text
                 continue
+            if upd.kind == "started":
+                continue
             lines.append(upd.text)
-            await status_msg.edit_text(truncate("\n".join(lines)))
+            if status_msg is None:
+                status_msg = await update.message.reply_text(truncate("\n".join(lines)))
+            else:
+                await status_msg.edit_text(truncate("\n".join(lines)))
     finally:
         chat_data["busy"] = False
 
@@ -181,7 +186,7 @@ async def _reply_voice(update: Update, context: ContextTypes.DEFAULT_TYPE, text:
 
 
 def build_app(token: str, store: CredentialStore) -> Application:
-    application = Application.builder().token(token).build()
+    application = Application.builder().token(token).concurrent_updates(True).build()
     application.bot_data["store"] = store
     application.add_handler(CommandHandler("start", on_start))
     application.add_handler(CommandHandler("quality", on_quality))
