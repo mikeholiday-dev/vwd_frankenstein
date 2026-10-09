@@ -35,7 +35,7 @@ from typing import Any
 from harness import config
 from harness.agent import model, tools
 from harness.agent.model import Stop, ToolSpec, obj
-from harness.kernel import compose
+from harness.kernel import compose, vault
 from harness.contracts import CODE_FILE, MANIFEST_FILE, TESTS_DIR, CallResult, EventType, Gap, InstallResult, Kind, Manifest
 from harness.wiring import Context
 
@@ -90,12 +90,17 @@ class Session:
         listing = "\n".join(f"- {e.manifest.ref}: {e.manifest.description} | input {json.dumps(e.manifest.interface.get('input', {}))}" for e in installed)
         text = model.run_role(
             self.ctx, "planner", MODELS["planner"], prompt("planner"),
-            f"Task:\n{task}\n\n{self._inputs_brief()}Installed capabilities:\n{listing or '(none)'}",
+            f"Task:\n{task}\n\n{self._inputs_brief()}{self._credentials_brief()}Installed capabilities:\n{listing or '(none)'}",
             self.planner_tools([e.manifest for e in installed]),
         )  # fmt: skip
         if self.answer is None:  # the planner stopped without submitting: keep what it said, flagged
             self._emit_answer(text or "(no answer)", [], "missing")
         return self.answer
+
+    def _credentials_brief(self) -> str:
+        if not (offered := vault.offered()):
+            return ""
+        return f"Credentials the operator provisioned for this run: {', '.join(offered)}. A capability can use them; you never see them.\n\n"
 
     def _inputs_brief(self) -> str:
         if not self.inputs:
@@ -186,7 +191,7 @@ class Session:
         bundle = gap.id
         (ctx.workdir / bundle).mkdir(parents=True, exist_ok=True)
         spec = f"Gap:\n{json.dumps(vars(gap), ensure_ascii=False, indent=2)}\n\n{self._upgrade_brief(upgrade)}"
-        if offered := [s for s in config.SECRETS if config.secret(s)]:  # names only; the operator opted in with FRANK_SECRETS
+        if offered := vault.offered():  # names only; the operator opted in with FRANK_SECRETS
             spec += f"\nCredentials the operator provisioned for this run: {', '.join(offered)}."
         if self.inputs:
             spec += (

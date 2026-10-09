@@ -71,7 +71,9 @@ Ask for the least that works. List every host the code really connects to, inclu
 
 ## Credentials
 
-You never see, write or send a key, token or password. If the brief names credentials the operator provisioned for this run, a capability that needs one lists its name under `permissions.secrets` and the service's host under `network`, and sends its requests to that host over plain `http://` with no credential in them: the harness adds the credential and forwards the request over HTTPS. Use a credential only when no keyless source does the job.
+You never see, write or send a key, token or password. If the brief names credentials the operator provisioned for this run, study what each one's service offers before you write a scraper of your own. Prefer the provisioned service when the data sits on a website rather than behind a documented keyless API, or when the site blocks plain requests, rate-limits them or renders its content with scripts. A keyless documented API is still the better source when one does the job.
+
+A capability that uses a credential lists its name under `permissions.secrets` and the service's host under `network`, and sends its requests to that host over plain `http://` with no credential in them: the harness adds the credential and forwards the request over HTTPS.
 
 ## While building
 

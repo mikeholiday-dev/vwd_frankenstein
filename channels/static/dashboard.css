@@ -223,3 +223,8 @@ tr.quarantined .name { text-decoration:line-through; color:var(--muted); }
 .file-pick { cursor:pointer; border:1px dashed var(--line); border-radius:6px; padding:5px 10px; }
 .file-pick:hover { border-color:var(--muted); }
 .file-pick.has-files { border-style:solid; color:var(--fg); }
+.file-list { display:flex; gap:6px; flex-wrap:wrap; }
+.file-tag { display:inline-flex; align-items:center; gap:4px; }
+.task-form-row .file-remove { border:0; background:none; padding:0 2px; color:var(--muted); font-size:13px; line-height:1; }
+.task-form-row .file-remove:hover { color:var(--bad); }
+.task-bar-inner.dropping { border:1px dashed var(--info); background:color-mix(in srgb, var(--card) 88%, var(--info)); }

@@ -107,7 +107,7 @@ function apply(e) {
   if (d.fake) r.fake = true;
   S.dirty.add("header").add("lab");
   switch (e.type) {
-    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.models = d.models; r.registryAtStart = d.registry; r.attached = d.attached || []; S.dirty.add("runs"); refreshSummarySoon(); break;
+    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.models = d.models; r.registryAtStart = d.registry; r.attached = d.attached || []; r.secrets = d.secrets || []; S.dirty.add("runs"); refreshSummarySoon(); break;
     case "plan": r.plan = d.text; break;
     case "gap": r.lab.push({ kind: "gap", ts: e.ts, d }); break;
     case "study": r.lab.push({ kind: "study", ts: e.ts, d }); break;
@@ -227,6 +227,7 @@ function renderHeader() {
     $("task").className = "";
     $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>`
       + `<div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}${r.attached?.length ? `<div class="muted">Attached: ${tags(r.attached)}</div>` : ""}`
+      + (r.secrets?.length ? `<div class="muted">Credentials offered: ${tags(r.secrets)}</div>` : "")
       + (r.models ? `<div class="muted">Models: ${ioTable(r.models)}</div>` : "")
       + (r.plan ? `<div class="plan"><span class="muted">Plan:</span> ${esc(r.plan)}</div>` : "") + answer;
   }
@@ -746,13 +747,66 @@ $("approvalModal").addEventListener("cancel", (ev) => ev.preventDefault());  // 
 
 // ---- new task -----------------------------------------------------------------------------------
 
+// Files picked, pasted (⌘V, e.g. copied in Finder or a screenshot) or dropped anywhere on the page all
+// land in one list. The server saves each under its own name, so a clash (every pasted screenshot is
+// "image.png") gets a -2, -3 suffix rather than silently overwriting the earlier one.
+const attached = [];
+
+function attachFiles(files) {
+  for (const f of files) {
+    const taken = new Set(attached.map((a) => a.name));
+    let name = f.name || "pasted";
+    const dot = name.lastIndexOf(".");
+    const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
+    for (let i = 2; taken.has(name); i++) name = `${stem}-${i}${ext}`;
+    attached.push(name === f.name ? f : new File([f], name, { type: f.type, lastModified: f.lastModified }));
+  }
+  renderAttached();
+}
+
+function renderAttached() {
+  $("taskFilesList").innerHTML = attached.map((f, i) =>
+    `<span class="tag file-tag">${esc(f.name)}<button type="button" class="file-remove" data-i="${i}" aria-label="Remove ${esc(f.name)}">×</button></span>`).join("");
+  $("taskFiles").closest(".file-pick").classList.toggle("has-files", attached.length > 0);
+}
+
 $("taskFiles").addEventListener("change", () => {
-  const files = $("taskFiles").files;
-  const label = $("taskFilesLabel");
-  const pick = $("taskFiles").closest(".file-pick");
-  if (!files.length) { label.textContent = "Attach files"; pick.classList.remove("has-files"); return; }
-  label.textContent = files.length === 1 ? files[0].name : `${files.length} files`;
-  pick.classList.add("has-files");
+  attachFiles($("taskFiles").files);
+  $("taskFiles").value = "";  // so picking the same file again still fires change
+});
+
+$("taskFilesList").addEventListener("click", (ev) => {
+  const i = ev.target.closest(".file-remove")?.dataset.i;
+  if (i === undefined) return;
+  attached.splice(Number(i), 1);
+  renderAttached();
+});
+
+// A Finder copy carries the file plus its name as text/plain; Word or Excel carry text/html with a
+// picture of the selection. Only the first is a file paste, the second should paste as text.
+document.addEventListener("paste", (ev) => {
+  const cb = ev.clipboardData;
+  if (!cb?.files.length || cb.types.includes("text/html")) return;
+  ev.preventDefault();
+  attachFiles(cb.files);
+  $("taskInput").focus();
+});
+
+// Drop anywhere: the task card lights up while files are dragged over the window. The counter is
+// because dragenter/dragleave fire for every child element crossed.
+let dragDepth = 0;
+const dragHasFiles = (ev) => ev.dataTransfer?.types.includes("Files");
+const setDropping = (on) => document.querySelector(".task-bar-inner").classList.toggle("dropping", on);
+document.addEventListener("dragenter", (ev) => { if (dragHasFiles(ev)) { dragDepth++; setDropping(true); } });
+document.addEventListener("dragleave", (ev) => { if (dragHasFiles(ev) && --dragDepth <= 0) { dragDepth = 0; setDropping(false); } });
+document.addEventListener("dragover", (ev) => { if (dragHasFiles(ev)) { ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; } });
+document.addEventListener("drop", (ev) => {
+  if (!dragHasFiles(ev)) return;
+  ev.preventDefault();  // otherwise the browser navigates away to the file
+  dragDepth = 0;
+  setDropping(false);
+  attachFiles(ev.dataTransfer.files);
+  $("taskInput").focus();
 });
 
 $("newTask").addEventListener("submit", async (ev) => {
@@ -766,12 +820,12 @@ $("newTask").addEventListener("submit", async (ev) => {
   const form = new FormData();
   form.append("task", task);
   form.append("models", $("taskModels").value);
-  for (const f of $("taskFiles").files) form.append("files", f);
+  for (const f of attached) form.append("files", f);
   try {
     await j("/api/tasks", { method: "POST", body: form });
     input.value = "";
-    $("taskFiles").value = "";
-    $("taskFiles").dispatchEvent(new Event("change"));
+    attached.length = 0;
+    renderAttached();
     $("taskStatus").textContent = "Started — the lab follows it as it runs.";
     select(null);  // follow the latest run, which is about to be this one
     refreshSummarySoon();
