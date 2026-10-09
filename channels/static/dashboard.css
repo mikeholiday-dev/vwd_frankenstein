@@ -23,6 +23,9 @@ header h1 { font-size:16px; margin:0; }
 .chip { display:inline-flex; align-items:center; font-size:12px; padding:3px 9px; border-radius:999px; background:var(--soft); color:var(--muted); }
 .chip.ok { background:var(--ok-bg); color:var(--ok); } .chip.bad { background:var(--bad-bg); color:var(--bad); }
 .chip.warn { background:var(--warn-bg); color:var(--warn); } .chip.info { background:var(--info-bg); color:var(--info); }
+.spinner { width:10px; height:10px; margin-right:6px; flex-shrink:0; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration:2.4s; } }
 button { border:1px solid var(--line); background:var(--soft); color:var(--fg); border-radius:6px; padding:7px 12px; font-size:12px; cursor:pointer; }
 button.danger { background:var(--bad-bg); color:var(--bad); border-color:transparent; }
 button.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent; }
@@ -77,6 +80,18 @@ button.ok { background:var(--ok-bg); color:var(--ok); border-color:transparent; 
 .run-item:first-of-type { margin-top:0; }
 .run-item > summary { list-style:none; cursor:pointer; padding:10px 12px; }
 .run-item > summary::-webkit-details-marker { display:none; }
+.run-item > summary:hover { background:var(--soft); border-radius:8px; }
+.run-item[open] > summary:hover { border-radius:8px 8px 0 0; }
+.run-item > summary:focus-visible { outline:2px solid var(--info); outline-offset:-2px; border-radius:8px; }
+
+/* ---- disclosure cues shared by every <details> list: chevron + "show/hide" hint from data-show/data-hide ---- */
+.chev { width:7px; height:7px; flex-shrink:0; margin:0 3px 0 1px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(-45deg); transition:transform .15s; }
+details[open] > summary .chev { transform:rotate(45deg); }
+.toggle-hint { font-size:12px; color:var(--muted); white-space:nowrap; }
+.toggle-hint::after { content:attr(data-show); }
+details[open] > summary .toggle-hint::after { content:attr(data-hide); }
+summary:hover .toggle-hint, summary:hover .chev { color:var(--info); border-color:var(--info); }
+
 .run-item .head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:4px; }
 .run-item .run-kill { padding:3px 9px; flex-shrink:0; }
 .run-item .task { font-weight:600; font-size:13px; }
@@ -109,10 +124,15 @@ tr.quarantined { opacity:.6; }
 .approval .actions { display:flex; gap:8px; margin-top:10px; }
 
 /* ---- credentials ---- */
-.cred-row-wrap { padding:12px 0; border-top:1px solid var(--line); }
-.cred-row-wrap:first-child { border-top:none; padding-top:0; }
-.cred-row-wrap:last-child { padding-bottom:0; }
-.cred-row { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.cred-item { padding:6px 0; border-top:1px solid var(--line); }
+.cred-item:first-child { border-top:none; padding-top:0; }
+.cred-item:last-child { padding-bottom:0; }
+.cred-item > summary { list-style:none; cursor:pointer; padding:6px 8px; margin:0 -8px; border-radius:6px; }
+.cred-item > summary::-webkit-details-marker { display:none; }
+.cred-item > summary:hover { background:var(--soft); }
+.cred-item > summary:focus-visible { outline:2px solid var(--info); outline-offset:-2px; }
+.cred-item .cred-form { margin:6px 0 6px; }
+.cred-row { display:flex; align-items:center; gap:8px; }
 .cred-row b { font-size:13px; }
 .cred-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; }
 .cred-form input[type=password] { flex:1; min-width:140px; background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:6px 8px; color:var(--fg); font:12px var(--mono); }
