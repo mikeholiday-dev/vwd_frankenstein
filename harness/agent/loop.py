@@ -43,7 +43,7 @@ OPUS, SONNET, HAIKU = "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"
 # Model per role, by FRANK_MODELS. A gap is built on Sonnet; only one that fails the install gate gets Opus for its repairs.
 TIERS = {
     "full": {"planner": SONNET, "builder": SONNET, "tester": SONNET, "repair": OPUS},
-    "cheap": {"planner": HAIKU, "builder": SONNET, "tester": HAIKU, "repair": SONNET},  # rehearsals only: demo mode refuses it
+    "cheap": {"planner": HAIKU, "builder": SONNET, "tester": HAIKU, "repair": OPUS},  # rehearsals only: demo mode refuses it
 }
 MODELS = TIERS[config.MODELS]
 JUDGE_MODEL = HAIKU

@@ -21,7 +21,7 @@ const CRED_LABELS = { telegram: "Telegram bot token", discord: "Discord bot toke
 
 const S = {
   config: null, summary: null, registry: [], versions: new Map(), creds: {}, pending: new Map(), budget: null, caps: [], lastId: -1,
-  eventsByRun: new Map(), openRuns: new Set(), approvalRun: new Map(),
+  eventsByRun: new Map(), openRuns: new Set(), openCreds: new Set(), approvalRun: new Map(),
 };
 
 // ---- per-run full log: every event carrying a run_id, in the same wording the console uses ----
@@ -159,10 +159,13 @@ function renderRuns() {
   $("runs").innerHTML = runs.slice(0, 15).map((r) => {
     const tone = STATUS_TONE[r.status] || "";
     const open = S.openRuns.has(r.run_id);
+    const status = r.status === "unfinished"
+      ? `<span class="chip ${tone}"><span class="spinner" aria-hidden="true"></span>${esc(STATUS_LABEL[r.status])}</span>`
+      : chip(STATUS_LABEL[r.status] || r.status, tone);
     const killBtn = r.status === "unfinished" ? `<button type="button" class="danger small run-kill" data-run="${esc(r.run_id)}">Kill this run</button>` : "";
     return `<details class="run-item" data-run="${esc(r.run_id)}"${open ? " open" : ""}>
       <summary>
-        <div class="head">${chip(STATUS_LABEL[r.status] || r.status, tone)}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span><span class="spacer"></span>${killBtn}</div>
+        <div class="head"><span class="chev" aria-hidden="true"></span>${status}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span><span class="spacer"></span><span class="toggle-hint" data-show="Show log" data-hide="Hide log" aria-hidden="true"></span>${killBtn}</div>
         <div class="muted small">session ${esc(r.session)} · $${Number(r.usd || 0).toFixed(3)}${r.built.length ? ` · built ${r.built.map(esc).join(", ")}` : ""}${r.reused.length ? ` · reused ${r.reused.map(esc).join(", ")}` : ""}</div>
         ${r.answer ? `<div class="answer">${esc(r.answer)}</div>` : ""}
       </summary>
@@ -302,24 +305,32 @@ function renderMeters() {
 
 function renderCreds() {
   $("creds").innerHTML = Object.entries(S.creds).map(([service, st]) => `
-    <div class="cred-row-wrap">
-      <div class="cred-row">
+    <details class="cred-item" data-service="${service}"${S.openCreds.has(service) ? " open" : ""}>
+      <summary class="cred-row">
+        <span class="chev" aria-hidden="true"></span>
         <b>${esc(CRED_LABELS[service] || service)}</b>
+        <span class="spacer"></span>
         <span>${st.configured ? chip("configured", "ok") : chip("not set")}${st.remembered ? " " + chip("remembered", "warn") : ""}</span>
-      </div>
+        <span class="toggle-hint" data-show="${st.configured ? "Change key" : "Set key"}" data-hide="Hide" aria-hidden="true"></span>
+      </summary>
       <form class="cred-form" data-service="${service}">
         <input type="password" placeholder="paste the key, nothing is shown back" autocomplete="off">
         <label><input type="checkbox"> remember</label>
         <button type="submit">Save</button>
         ${st.remembered ? `<button type="button" class="danger" data-forget="${service}">Forget</button>` : ""}
       </form>
-    </div>`).join("");
+    </details>`).join("");
+  $("creds").querySelectorAll("details.cred-item").forEach((el) => el.addEventListener("toggle", () => {
+    if (el.open) S.openCreds.add(el.dataset.service);
+    else S.openCreds.delete(el.dataset.service);
+  }));
   $("creds").querySelectorAll("form").forEach((f) => f.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const value = f.querySelector("input[type=password]").value;
     const remember = f.querySelector("input[type=checkbox]").checked;
     if (!value) return;
     await j(`/api/credentials/${f.dataset.service}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value, remember }) });
+    S.openCreds.delete(f.dataset.service); // saved: fold the row back to its status line
     loadCreds();
   }));
   $("creds").querySelectorAll("[data-forget]").forEach((b) => b.addEventListener("click", async () => {
