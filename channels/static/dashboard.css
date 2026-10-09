@@ -69,6 +69,7 @@ body:has(.app) { height:100vh; }
 #task .task { font-size:18px; font-weight:650; line-height:1.35; margin-bottom:4px; }
 #task .meta { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:13px; }
 #task .plan { margin-top:6px; }
+#task .origin { margin-top:6px; font-size:13px; }
 .answer { margin-top:10px; border-left:3px solid var(--ok); padding:2px 0 2px 10px; }
 .answer.unverified { border-color:var(--bad); }
 #task .answer { margin-top:14px; padding:4px 0 4px 14px; font-size:17px; line-height:1.5; }
@@ -78,6 +79,9 @@ body:has(.app) { height:100vh; }
 #task .answer.none { border-color:var(--line); color:var(--muted); font-size:15px; }
 
 /* ---- lab: one item per gap / study / capability, a step list per capability ---- */
+/* The lab and the timeline scroll inside their cards, newest on top, so the registry below them stays one short scroll away. */
+#lab, #timeline { max-height:60vh; overflow:auto; }
+#timeline { max-height:40vh; }
 .item { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:10px; }
 .item:first-of-type { margin-top:0; }
 .item.gap { border-left:3px solid var(--info); }

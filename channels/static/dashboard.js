@@ -13,6 +13,8 @@ const tags = (xs, cls = "") => (xs || []).map((x) => `<span class="tag ${cls}">$
 const none = "<span class='muted'>none</span>";
 const denied = (xs) => (xs?.length ? ` <span class="refused">egress refused:</span> ${tags(xs, "deny")}` : "");
 const refused = (reason) => String(reason || "").startsWith("refused:");
+const md = (s) => esc(s).replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");  // answers come as light markdown: bold only
+const cacheFile = (name) => /(^|\/)(\.pytest_cache|__pycache__)\//.test(name);  // pytest's own leftovers, not agent work
 // own | "regression: name@vN tests" | retest (gate.run_tests)
 const suite = (x) => (!x || x === "own" ? "" : x === "retest" ? chip("retest", "info") : chip(x.replace(/ tests$/, ""), "info"));
 
@@ -107,7 +109,7 @@ function apply(e) {
   if (d.fake) r.fake = true;
   S.dirty.add("header").add("lab");
   switch (e.type) {
-    case "run_started": r.task = d.task; r.started = e.ts; r.auth = d.auth; r.models = d.models; r.registryAtStart = d.registry; r.attached = d.attached || []; r.secrets = d.secrets || []; S.dirty.add("runs"); refreshSummarySoon(); break;
+    case "run_started": r.task = d.task; r.started = e.ts; r.pid = d.pid; r.auth = d.auth; r.models = d.models; r.registryAtStart = d.registry; r.attached = d.attached || []; r.secrets = d.secrets || []; S.dirty.add("runs"); refreshSummarySoon(); break;
     case "plan": r.plan = d.text; break;
     case "gap": r.lab.push({ kind: "gap", ts: e.ts, d }); break;
     case "study": r.lab.push({ kind: "study", ts: e.ts, d }); break;
@@ -115,7 +117,7 @@ function apply(e) {
       const c = cap(r, d.ref);
       c.built = true; c.state = "building"; c.tone = "";
       c.steps.push({ type: "build", ts: e.ts, d });
-      for (const [name, text] of Object.entries(d.contents || {})) c.files.set(name, { text, attempt: d.attempt, role: d.role });
+      for (const [name, text] of Object.entries(d.contents || {})) if (!cacheFile(name)) c.files.set(name, { text, attempt: d.attempt, role: d.role });
       break;
     }
     case "test_run": {
@@ -202,7 +204,8 @@ function renderHeader() {
   if (c) {
     $("chips").innerHTML = (c.mode === "demo" ? chip("demo mode", "ok") : chip("dev mode"))
       + (c.fakes.length ? " " + chip("fake " + c.fakes.join(" + "), "warn") : "") + " " + chip("auth: " + c.auth)
-      + (c.models === "cheap" ? " " + chip("models: cheap", "warn") : "");
+      + (c.models === "cheap" ? " " + chip("models: cheap", "warn") : "")
+      + (c.fakes.includes("sandbox") ? "" : ` <span class="chip ok" title="Generated code runs only in Docker: no host mounts, no credentials, network only through the egress proxy">sandbox: Docker, no secrets</span>`);
     $("reset").hidden = c.mode !== "dev";
   }
   const r = current();
@@ -219,23 +222,37 @@ function renderHeader() {
   $("runBanners").innerHTML = banners.join("");
 
   if (r) {
-    const started = r.registryAtStart ? `<div class="muted">Registry at start: ${r.registryAtStart.length ? tags(r.registryAtStart) : "empty"}</div>` : "";
-    const a = r.answer, unverified = a && a.provenance && a.provenance !== "ok";
-    const answer = a ? `<div class="answer${unverified ? " unverified" : ""}"><div>${esc(a.text)}</div>
+    const origin = r.registryAtStart ? `<div class="origin">${r.pid ? chip("new process · pid " + r.pid, "info") + " " : ""}<span class="muted">Registry at start:</span> ${r.registryAtStart.length ? tags(r.registryAtStart) : "<span class='muted'>empty</span>"}</div>` : "";
+    const a = r.answer, unverified = a && a.provenance && a.provenance !== "ok", earlier = fromEarlier(r, a);
+    const answer = a ? `<div class="answer${unverified ? " unverified" : ""}"><div>${md(a.text)}</div>
       <div class="muted">Cites ${a.call_ids?.length ? tags(a.call_ids) : "no calls"}${a.provenance ? " " + chip(unverified ? "provenance: " + a.provenance : "provenance checked", unverified ? "bad" : "ok") : ""}</div>
-      ${a.reused?.length ? `<div class="muted">Reused ${tags(a.reused)}</div>` : ""}${a.built?.length ? `<div class="muted">Built ${tags(a.built, "add")}</div>` : ""}</div>` : "";
+      ${earlier.reused.length ? `<div class="muted">Reused from earlier runs ${tags(earlier.reused)}</div>` : ""}${earlier.extended.length ? `<div class="muted">Extended ${earlier.extended.map(([from, to]) => `<span class="tag">${esc(from)}</span> → <span class="tag add">${esc(to)}</span>`).join(" ")}</div>` : ""}${a.built?.length ? `<div class="muted">Built ${tags(a.built, "add")}</div>` : ""}</div>` : "";
     const waiting = r.status === "running"
       ? `<div class="answer pending"><span class="spinner" aria-hidden="true"></span>Working on it…</div>`
       : `<div class="answer none">No answer (${esc(STATUS_LABEL[r.status] || r.status)}).</div>`;
     $("task").className = "";
-    $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>` + (answer || waiting)
-      + `<div class="meta"><div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>${started}`
+    $("task").innerHTML = `<div class="task">${esc(r.task || "(no task: capability installed or called directly)")}</div>` + origin + (answer || waiting)
+      + `<div class="meta"><div class="muted">Session ${esc(r.session)} · run ${esc(r.id)} · started ${clock(r.started)}</div>`
       + (r.attached?.length ? `<div class="muted">Attached: ${tags(r.attached)}</div>` : "")
       + (r.secrets?.length ? `<div class="muted">Credentials offered: ${tags(r.secrets)}</div>` : "")
       + (r.models ? `<div class="muted">Models: ${ioTable(r.models)}</div>` : "")
       + (r.plan ? `<div class="plan"><span class="muted">Plan:</span> ${esc(r.plan)}</div>` : "") + `</div>`;
   }
   renderMeters(r);
+}
+
+// What this run took from the registry it started with: capabilities it called as they were, and
+// ones it upgraded to a new version. Worked out from the log, not from the answer's own citations,
+// which only name the version the answer finally relied on.
+function fromEarlier(r, a) {
+  const atStart = new Set(r.registryAtStart || []);
+  const startRef = new Map([...atStart].map((ref) => [ref.split("@v")[0], ref]));
+  const caps = r.lab.filter((x) => x.kind === "cap");
+  const called = caps.filter((c) => c.steps.some((s) => s.type === "call")).map((c) => c.ref);
+  const reused = [...new Set([...(a?.reused || []), ...called.filter((ref) => atStart.has(ref))])].sort();
+  const extended = caps.filter((c) => c.built && c.state === "installed" && !atStart.has(c.ref) && startRef.has(c.ref.split("@v")[0]))
+    .map((c) => [startRef.get(c.ref.split("@v")[0]), c.ref]);
+  return { reused, extended };
 }
 
 // Meters follow the selected run, the same as the lab: a budget event from another run in
@@ -285,7 +302,7 @@ function renderStep(s, c) {
   const t = `<span class="muted">${clock(s.ts)}</span>`;
   switch (s.type) {
     case "build":
-      return `<li>${t} <b>${esc(d.role)}</b> · attempt ${esc(d.attempt)}${d.files ? ` · <span class="muted">${esc(d.files.join(", "))}</span>` : ""}</li>`;
+      return `<li>${t} <b>${esc(d.role)}</b> · attempt ${esc(d.attempt)}${d.files?.some((f) => !cacheFile(f)) ? ` · <span class="muted">${esc(d.files.filter((f) => !cacheFile(f)).join(", "))}</span>` : ""}</li>`;
     case "test": {
       const last = c.steps.filter((x) => x.type === "test").pop() === s;
       const meta = [d.duration_s != null ? d.duration_s.toFixed(1) + " s" : "", d.sandbox_run_id ? "sandbox run " + d.sandbox_run_id : ""].filter(Boolean).join(" · ");
@@ -570,7 +587,7 @@ function renderRuns() {
       <summary>
         <div class="head"><span class="chev" aria-hidden="true"></span>${status}${r.fake ? chip("fake", "warn") : ""}<span class="task">${esc(r.task || "(direct install or call)")}</span><span class="spacer"></span><span class="toggle-hint" data-show="Show log" data-hide="Hide log" aria-hidden="true"></span>${inspect}${killBtn}</div>
         <div class="muted small">session ${esc(r.session)} · $${Number(r.usd || 0).toFixed(3)}${r.built.length ? ` · built ${r.built.map(esc).join(", ")}` : ""}${r.reused.length ? ` · reused ${r.reused.map(esc).join(", ")}` : ""}</div>
-        ${r.answer ? `<div class="answer">${esc(r.answer)}</div>` : ""}
+        ${r.answer ? `<div class="answer">${md(r.answer)}</div>` : ""}
       </summary>
       ${open ? renderRunLog(r.run_id) : ""}
     </details>`;
@@ -663,6 +680,11 @@ async function post(url, body, what) {
 
 async function loadConfig() {
   S.config = await j("/api/config");
+  // Demo mode refuses cheap models: a run started on them would die before it began.
+  if (S.config.mode === "demo") {
+    $("taskModels").querySelector("option[value=cheap]").disabled = true;
+    $("taskModels").value = "full";
+  }
   S.dirty.add("header");
   schedule();
 }
