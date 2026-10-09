@@ -71,3 +71,31 @@ def test_speak_uses_the_given_voice_id(monkeypatch):
     monkeypatch.setattr(FakeElevenLabs, "__init__", capture_init)
     voice.speak("say this", api_key="k", voice_id="custom-voice")
     assert client_holder["client"].text_to_speech.calls[0][0] == "custom-voice"
+
+
+def test_language_code_reaches_both_sdk_calls_only_when_set(monkeypatch):
+    kwargs = {}
+
+    class LangSTT:
+        def convert(self, **kw):
+            kwargs["stt"] = kw
+            return SimpleNamespace(text="x")
+
+    class LangTTS:
+        def stream(self, voice_id, **kw):
+            kwargs["tts"] = (voice_id, kw)
+            yield b"a"
+
+    class LangClient:
+        def __init__(self, api_key):
+            self.speech_to_text, self.text_to_speech = LangSTT(), LangTTS()
+
+    monkeypatch.setattr(voice, "ElevenLabs", LangClient)
+    voice.transcribe(b"a", api_key="k", language_code="cs")
+    voice.speak("t", api_key="k", voice_id="V1", language_code="cs")
+    assert kwargs["stt"]["language_code"] == "cs"
+    assert kwargs["tts"][0] == "V1" and kwargs["tts"][1]["language_code"] == "cs"
+
+    voice.transcribe(b"a", api_key="k")
+    voice.speak("t", api_key="k")
+    assert "language_code" not in kwargs["stt"] and "language_code" not in kwargs["tts"][1]

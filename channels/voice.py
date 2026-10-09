@@ -15,16 +15,18 @@ TTS_MODEL = "eleven_turbo_v2_5"  # low-latency model: the reply is spoken once, 
 DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs' standard "Rachel" voice; override via speak(voice_id=...)
 
 
-def transcribe(audio: bytes, *, api_key: str, filename: str = "voice.ogg") -> str:
-    """Speech to text for one incoming Telegram voice message."""
+def transcribe(audio: bytes, *, api_key: str, filename: str = "voice.ogg", language_code: str | None = None) -> str:
+    """Speech to text for one incoming Telegram voice message. No language code: the model detects it."""
     client = ElevenLabs(api_key=api_key)
-    result = client.speech_to_text.convert(model_id=STT_MODEL, file=(filename, audio))
+    extra = {"language_code": language_code} if language_code else {}
+    result = client.speech_to_text.convert(model_id=STT_MODEL, file=(filename, audio), **extra)
     return result.text
 
 
-def speak(text: str, *, api_key: str, voice_id: str = DEFAULT_VOICE_ID) -> bytes:
+def speak(text: str, *, api_key: str, voice_id: str = DEFAULT_VOICE_ID, language_code: str | None = None) -> bytes:
     """Text to speech for one reply. Uses the streaming endpoint for a faster time-to-first-byte
     even though the result is buffered whole here — Telegram's API needs a complete file to send
     a voice note, there's no such thing as a partial upload it can start playing."""
     client = ElevenLabs(api_key=api_key)
-    return b"".join(client.text_to_speech.stream(voice_id, text=text, model_id=TTS_MODEL, output_format="mp3_44100_128"))
+    extra = {"language_code": language_code} if language_code else {}
+    return b"".join(client.text_to_speech.stream(voice_id, text=text, model_id=TTS_MODEL, output_format="mp3_44100_128", **extra))

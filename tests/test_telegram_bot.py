@@ -223,7 +223,7 @@ async def test_handle_task_sends_voice_when_a_key_is_present(monkeypatch):
         yield Progress("finished", "ok")
 
     monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
-    monkeypatch.setattr(bot.voice, "speak", lambda text, *, api_key: b"audio-bytes")
+    monkeypatch.setattr(bot.voice, "speak", lambda text, **kw: b"audio-bytes")
     store = CredentialStore()
     store.set("elevenlabs", "a-key")
     update = make_update()
@@ -393,8 +393,8 @@ async def test_voice_message_with_a_key_transcribes_and_runs_the_task(monkeypatc
         return FakeVoiceFile()
 
     monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
-    monkeypatch.setattr(bot.voice, "transcribe", lambda audio, api_key: "convert 10 eur")
-    monkeypatch.setattr(bot.voice, "speak", lambda text, api_key: b"mp3")
+    monkeypatch.setattr(bot.voice, "transcribe", lambda audio, **kw: "convert 10 eur")
+    monkeypatch.setattr(bot.voice, "speak", lambda text, **kw: b"mp3")
     store = CredentialStore()
     store.set("elevenlabs", "el-key")
     update = make_update()
@@ -407,7 +407,7 @@ async def test_voice_message_with_a_key_transcribes_and_runs_the_task(monkeypatc
 
 @pytest.mark.asyncio
 async def test_voice_transcription_failure_is_reported_not_raised(monkeypatch):
-    def boom(audio, api_key):
+    def boom(audio, **kw):
         raise RuntimeError("bad key")
 
     class FakeVoiceFile:
@@ -531,3 +531,111 @@ async def test_no_starting_message_and_first_reply_is_the_first_real_progress_li
 def test_updates_are_processed_concurrently_so_approval_taps_are_not_queued_behind_a_running_task():
     application = bot.build_app("123456:TEST-TOKEN", CredentialStore())
     assert application.update_processor.max_concurrent_updates > 1
+
+
+# ---- /voice per-chat settings ------------------------------------------------------------------
+
+
+async def _voice_cmd(*args, chat_data=None):
+    update, context = make_update(), make_context(chat_data=chat_data if chat_data is not None else {}, args=list(args))
+    await bot.on_voice_setting(update, context)
+    return update.message.sent[0][0], context.chat_data
+
+
+@pytest.mark.asyncio
+async def test_voice_command_with_no_args_shows_defaults_and_usage():
+    reply, data = await _voice_cmd()
+    assert "replies on" in reply and "language auto" in reply and "/voice" in reply
+    assert data == {}
+
+
+@pytest.mark.asyncio
+async def test_voice_off_and_on_toggle_spoken_replies():
+    _, data = await _voice_cmd("off")
+    assert data["voice_reply"] is False
+    _, data = await _voice_cmd("ON", chat_data=data)
+    assert data["voice_reply"] is True
+
+
+@pytest.mark.asyncio
+async def test_voice_id_keeps_its_case_and_default_resets_it():
+    _, data = await _voice_cmd("id", "AbC123xyz")
+    assert data["voice_id"] == "AbC123xyz"
+    _, data = await _voice_cmd("id", "default", chat_data=data)
+    assert "voice_id" not in data
+
+
+@pytest.mark.asyncio
+async def test_voice_lang_accepts_a_code_and_auto_clears_it():
+    _, data = await _voice_cmd("lang", "CS")
+    assert data["voice_lang"] == "cs"
+    _, data = await _voice_cmd("lang", "auto", chat_data=data)
+    assert "voice_lang" not in data
+
+
+@pytest.mark.asyncio
+async def test_voice_lang_rejects_garbage():
+    reply, data = await _voice_cmd("lang", "english!!")
+    assert "voice_lang" not in data and "Usage" in reply
+
+
+@pytest.mark.asyncio
+async def test_voice_settings_are_per_chat():
+    _, a = await _voice_cmd("off")
+    _, b = await _voice_cmd("lang", "uk")
+    assert "voice_lang" not in a and "voice_reply" not in b
+
+
+@pytest.mark.asyncio
+async def test_spoken_reply_uses_the_chats_voice_and_language(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(bot.voice, "speak", lambda text, **kw: seen.update(kw) or b"mp3")
+    store = CredentialStore()
+    store.set("elevenlabs", "el-key")
+    update = make_update()
+    context = make_context(store=store, chat_data={"voice_id": "V1", "voice_lang": "cs"})
+    await bot._reply_voice(update, context, "ahoj")
+    assert seen == {"api_key": "el-key", "voice_id": "V1", "language_code": "cs"}
+
+
+@pytest.mark.asyncio
+async def test_no_spoken_reply_when_voice_is_off(monkeypatch):
+    called = []
+    monkeypatch.setattr(bot.voice, "speak", lambda *a, **k: called.append(1) or b"mp3")
+    store = CredentialStore()
+    store.set("elevenlabs", "el-key")
+    update = make_update()
+    await bot._reply_voice(update, make_context(store=store, chat_data={"voice_reply": False}), "ahoj")
+    assert not called and not update.message.sent
+
+
+@pytest.mark.asyncio
+async def test_transcription_uses_the_chats_language(monkeypatch):
+    seen = {}
+
+    class FakeVoiceFile:
+        async def download_as_bytearray(self):
+            return bytearray(b"ogg")
+
+    async def get_file():
+        return FakeVoiceFile()
+
+    async def fake_run_task(task, **k):
+        yield Progress("finished", "ok")
+
+    monkeypatch.setattr(bot.runner, "run_task", fake_run_task)
+    monkeypatch.setattr(bot.voice, "transcribe", lambda audio, **kw: seen.update(kw) or "text")
+    store = CredentialStore()
+    store.set("elevenlabs", "el-key")
+    update = make_update()
+    update.message.voice = SimpleNamespace(get_file=get_file)
+    await bot.on_voice(update, make_context(store=store, chat_data={"voice_lang": "uk"}))
+    assert seen["language_code"] == "uk"
+
+
+def test_voice_command_is_registered_on_the_app():
+    from telegram.ext import CommandHandler
+
+    application = bot.build_app("123456:TEST-TOKEN", CredentialStore())
+    commands = {c for h in application.handlers[0] if isinstance(h, CommandHandler) for c in h.commands}
+    assert "voice" in commands

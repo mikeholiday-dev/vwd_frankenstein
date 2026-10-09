@@ -48,7 +48,7 @@ async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Send me a task (text or voice) and I'll run it through Frankenstein. Attach a file and I'll "
         "pass it along as an input — send it with a caption to run right away, or send it alone and "
-        "then your task text. /quality cheap|full picks the model tier (cheap by default). /kill stops "
+        "then your task text. /quality cheap|full picks the model tier (cheap by default). /voice sets spoken replies, voice and language. /kill stops "
         "whatever's running right now, everywhere, not just in this chat."
     )
 
@@ -60,6 +60,42 @@ async def on_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     context.chat_data["quality"] = arg
     await update.message.reply_text(f"This chat now runs on {arg} models.")
+
+
+async def on_voice_setting(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/voice on|off, /voice id <voice_id|default>, /voice lang <code|auto> — per chat, in chat_data."""
+    data = context.chat_data
+    args = list(context.args)
+    if args:
+        args[0] = args[0].lower()
+    if args and args[0] in ("on", "off", "lang") and len(args) > 1:
+        args[1] = args[1].lower()  # voice ids stay case-sensitive
+    match args:
+        case ["on"] | ["off"]:
+            data["voice_reply"] = args[0] == "on"
+            await update.message.reply_text(f"Spoken replies are {args[0]} in this chat.")
+        case ["id", "default"]:
+            data.pop("voice_id", None)
+            await update.message.reply_text("Back to the default voice.")
+        case ["id", voice_id]:
+            data["voice_id"] = voice_id
+            await update.message.reply_text(f"Spoken replies now use voice {voice_id}.")
+        case ["lang", "auto"]:
+            data.pop("voice_lang", None)
+            await update.message.reply_text("Language is detected automatically.")
+        case ["lang", code] if code.isalpha() and 2 <= len(code) <= 3:
+            data["voice_lang"] = code
+            await update.message.reply_text(f"Voice language set to {code} (for transcribing and speaking).")
+        case _:
+            await update.message.reply_text(
+                f"Voice: replies {'on' if voice_reply_on(data) else 'off'}, voice {data.get('voice_id', 'default')}, "
+                f"language {data.get('voice_lang', 'auto')}.\n"
+                "Usage: /voice on|off, /voice id <voice_id|default>, /voice lang <code|auto> (e.g. cs, en, uk)."
+            )
+
+
+def voice_reply_on(chat_data: dict) -> bool:
+    return chat_data.get("voice_reply", True)
 
 
 async def on_kill(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -110,7 +146,7 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     file = await update.message.voice.get_file()
     audio = bytes(await file.download_as_bytearray())
     try:
-        text = await asyncio.to_thread(voice.transcribe, audio, api_key=key)
+        text = await asyncio.to_thread(voice.transcribe, audio, api_key=key, language_code=context.chat_data.get("voice_lang"))
     except Exception as e:  # the key might be wrong, or the service down; don't crash the chat over it
         await update.message.reply_text(f"Couldn't transcribe that: {e}")
         return
@@ -173,10 +209,13 @@ async def on_approval_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def _reply_voice(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     key = context.bot_data["store"].get("elevenlabs")
-    if not key:
-        return  # no key: text-only reply, not a hard failure
+    if not key or not voice_reply_on(context.chat_data):
+        return  # no key or switched off: text-only reply, not a hard failure
     try:
-        audio = await asyncio.to_thread(voice.speak, text, api_key=key)
+        audio = await asyncio.to_thread(
+            voice.speak, text, api_key=key,
+            voice_id=context.chat_data.get("voice_id", voice.DEFAULT_VOICE_ID), language_code=context.chat_data.get("voice_lang"),
+        )
     except Exception:
         return  # a bad TTS call shouldn't hide the text answer the user already has
     await update.message.reply_voice(voice=audio)
@@ -190,6 +229,7 @@ def build_app(token: str, store: CredentialStore) -> Application:
     application.bot_data["store"] = store
     application.add_handler(CommandHandler("start", on_start))
     application.add_handler(CommandHandler("quality", on_quality))
+    application.add_handler(CommandHandler("voice", on_voice_setting))
     application.add_handler(CommandHandler("kill", on_kill))
     application.add_handler(MessageHandler(filters.VOICE, on_voice))
     application.add_handler(MessageHandler(filters.Document.ALL, on_document))
