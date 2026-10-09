@@ -83,8 +83,9 @@
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th { text-align:left; font-weight:500; color:var(--muted); font-size:12px; padding:0 6px 4px 0; }
   td { padding:6px 6px 6px 0; border-top:1px solid var(--line); vertical-align:top; }
-  td.actions { white-space:nowrap; text-align:right; padding-right:0; }
-  td.actions select, td.actions button { padding:2px 6px; font-size:12px; }
+  .reg .name, .reg .tag { overflow-wrap:break-word; }
+  .reg .actions { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .reg .actions select, .reg .actions button { padding:2px 6px; font-size:12px; }
   tr.quarantined .name { text-decoration:line-through; color:var(--muted); }
   .ev { display:grid; grid-template-columns:64px 150px minmax(0,1fr); gap:8px; padding:4px 0; border-top:1px solid var(--line); font-size:13px; }
   .ev:first-child { border-top:0; }
@@ -431,19 +432,19 @@ function renderApprovals() {
 function renderRegistry() {
   $("regcount").textContent = S.registry.length;
   if (!S.registry.length) { $("registry").innerHTML = "<span class='muted'>Empty. Only the agent adds capabilities, through the install gate.</span>"; return; }
-  $("registry").innerHTML = `<table><tr><th>Capability</th><th>Reaches</th><th></th></tr>` + S.registry.map((e) => {
+  $("registry").innerHTML = `<table class="reg"><tr><th>Capability</th><th>Reaches</th></tr>` + S.registry.map((e) => {
     const m = e.manifest, q = e.status === "quarantined";
     const seen = new Set(S.versions.get(m.name) || []);
     for (let v = 1; v < m.version; v++) seen.add(v);
     seen.delete(m.version);
     const others = [...seen].sort((a, b) => b - a);
     const rollback = others.length
-      ? `<select id="rb-${esc(m.name)}" aria-label="Version to roll back to">${others.map((v) => `<option value="${v}">v${v}</option>`).join("")}</select> <button data-act="rollback" data-name="${esc(m.name)}">Roll back</button> `
+      ? `<select id="rb-${esc(m.name)}" aria-label="Version to roll back to">${others.map((v) => `<option value="${v}">v${v}</option>`).join("")}</select><button data-act="rollback" data-name="${esc(m.name)}">Roll back</button>`
       : "";
     return `<tr class="${q ? "quarantined" : ""}"><td><span class="mono name">${esc(m.name)}@v${esc(m.version)}</span> ${q ? chip("quarantined", "bad") : chip("active", "ok")}
-        <div class="muted">${esc(m.description)}</div>${m.uses?.length ? `<div class="muted">composes ${tags(m.uses)}</div>` : ""}<div class="muted">${e.installed_at ? "installed " + esc(e.installed_at.replace("T", " ").slice(0, 16)) : ""}</div></td>
-      <td>${(m.permissions.network || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("") || "<span class='muted'>no network</span>"}</td>
-      <td class="actions">${rollback}${q ? "" : `<button data-act="quarantine" data-name="${esc(m.name)}">Quarantine</button>`}</td></tr>`;
+        <div class="muted">${esc(m.description)}</div>${m.uses?.length ? `<div class="muted">composes ${tags(m.uses)}</div>` : ""}<div class="muted">${e.installed_at ? "installed " + esc(e.installed_at.replace("T", " ").slice(0, 16)) : ""}</div>
+        ${rollback || !q ? `<div class="actions">${rollback}${q ? "" : `<button data-act="quarantine" data-name="${esc(m.name)}">Quarantine</button>`}</div>` : ""}</td>
+      <td>${(m.permissions.network || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("") || "<span class='muted'>no network</span>"}</td></tr>`;
   }).join("") + "</table>";
 }
 
