@@ -107,10 +107,11 @@
             <option value="full">full</option>
           </select>
         </label>
-        <label class="file-pick muted small">
+        <label class="file-pick muted small" title="Or paste (⌘V) or drop files anywhere on the page">
           <input type="file" id="taskFiles" multiple hidden>
-          <span id="taskFilesLabel">Attach files</span>
+          <span>Attach files</span>
         </label>
+        <span id="taskFilesList" class="file-list"></span>
         <span class="spacer"></span>
         <span id="taskStatus" class="muted small"></span>
         <button type="submit" class="ok">Run</button>

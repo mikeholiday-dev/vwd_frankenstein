@@ -59,12 +59,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if status == "ok" else 1
 
     from harness.agent.loop import MODELS, run_session
+    from harness.kernel import vault
 
     if missing := [str(f) for f in a.attach if not f.is_file()]:
         p.error(f"--attach: not a file: {', '.join(missing)}")
     ctx.events.emit(
         EventType.RUN_STARTED, task=a.task, pid=os.getpid(), auth=config.AUTH, models=MODELS,
         registry=[e.manifest.ref for e in ctx.registry.list()], attached=[f.name for f in a.attach],
+        secrets=vault.offered(),  # names only
     )  # fmt: skip
     status = "failed"
     try:

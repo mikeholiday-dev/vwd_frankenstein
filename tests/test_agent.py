@@ -278,16 +278,17 @@ def test_study_without_a_token_searches_duckduckgo(ctx, no_keys, monkeypatch):
 
 
 @pytest.mark.parametrize("offered", [[], ["APIFY_TOKEN"]])
-def test_builder_is_told_secret_names_only_when_the_operator_offers_them(ctx, script, no_keys, monkeypatch, offered):
+def test_planner_and_builder_are_told_secret_names_only_when_the_operator_offers_them(ctx, script, no_keys, monkeypatch, offered):
     roles, seen = script
     roles["planner"] = lambda call: call("report_gap", **GAP) and call("submit_answer", text="x", call_ids=[])
     monkeypatch.setenv("APIFY_TOKEN", "tok-123")
     monkeypatch.setattr(config, "SECRETS", offered)
     loop.run_session("repeat", ctx)
 
-    brief = next(prompt for role, _, prompt, _ in seen if role == "builder")
-    assert ("Credentials the operator provisioned for this run: APIFY_TOKEN." in brief) == bool(offered)
-    assert "tok-123" not in brief
+    for want in ("planner", "builder"):
+        brief = next(prompt for role, _, prompt, _ in seen if role == want)
+        assert ("Credentials the operator provisioned for this run: APIFY_TOKEN." in brief) == bool(offered)
+        assert "tok-123" not in brief
 
 
 @pytest.mark.parametrize("url", ["http://127.0.0.1:8000/", "http://localhost/x", "file:///etc/passwd", "ftp://example.org/x"])
