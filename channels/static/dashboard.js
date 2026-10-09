@@ -420,7 +420,7 @@ function approvalCard({ data: d, session, ts, fake }) {
       ${details(`ap-manifest-${d.id}`, "full manifest", `<pre>${json(m)}</pre>`)}
     </div>
     <div class="banner bad modal-error" hidden></div>
-    <div class="actions"><input type="text" data-reason="${esc(d.id)}" value="${esc(S.reasons.get(d.id) || "")}" placeholder="Reason (optional)" maxlength="200" aria-label="Reason">
+    <div class="actions"><input type="text" data-reason="${esc(d.id)}" value="${esc(S.reasons.get(d.id) || "")}" placeholder="Reason (optional)" maxlength="200" aria-label="Reason" autofocus>
       <button class="ok" data-act="approve" data-id="${esc(d.id)}"${rep.passed ? "" : " disabled title='Tests failed'"}>Approve</button>
       <button class="danger" data-act="reject" data-id="${esc(d.id)}">Reject</button>
       <button class="danger" data-act="kill" title="Stop every run instead of deciding">Kill switch</button></div>`;
